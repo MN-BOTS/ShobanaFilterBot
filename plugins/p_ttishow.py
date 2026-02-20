@@ -1,3 +1,5 @@
+import asyncio
+
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.errors.exceptions.bad_request_400 import MessageTooLong, PeerIdInvalid
@@ -142,16 +144,21 @@ async def re_enable_chat(bot, message):
 
 @Client.on_message(filters.command('stats') & filters.incoming)
 async def get_stats(bot, message):
-    if message.from_user.id in ADMINS:
+    if message.from_user and message.from_user.id in ADMINS:
         rju = await message.reply('<b>𝙰𝙲𝙲𝙴𝚂𝚂𝙸𝙽𝙶 𝚂𝚃𝙰𝚃𝚄𝚂 𝙳𝙴𝚃𝙰𝙸𝙻𝚂...</b>')
         total_users = await db.total_users_count()
         totl_chats = await db.total_chat_count()
         files = await Media.count_documents()
         size = await db.get_db_size()
-        free = 536870912 - size
-        size = get_size(size)
-        free = get_size(free)
-        await rju.edit(script.STATUS_TXT.format(files, total_users, totl_chats, size, free))
+        db_limit = await db.get_db_limit()
+        backend = await db.get_db_backend()
+        used_value = 0 if size is None else max(int(size), 0)
+        free = max(int(db_limit) - used_value, 0)
+        size_text = "Unknown" if size is None else get_size(used_value)
+        free_text = get_size(free)
+        status_text = script.STATUS_TXT.format(files, total_users, totl_chats, size_text, free_text)
+        status_text += f"\n 𝙳𝙱 𝙱𝙰𝙲𝙺𝙴𝙽𝙳: <code>{backend}</code>"
+        await rju.edit(status_text)
     else:
         k = await message.reply_text("<b>Sᴏʀʀʏ ᴛʜɪꜱ ᴄᴏᴍᴍᴀɴᴅ ᴏɴʟʏ ᴀᴅᴍɪɴꜱ</b>")        
         await asyncio.sleep(10)

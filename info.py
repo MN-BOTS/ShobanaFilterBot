@@ -40,10 +40,14 @@ auth_grp = environ.get('AUTH_GROUP')
 DEFAULT_AUTH_CHANNELS = [int(x) for x in environ.get("AUTH_CHANNEL", "").split() if x.lstrip('-').isdigit()]
 AUTH_GROUPS = [int(ch) for ch in auth_grp.split()] if auth_grp else None
 
-# MongoDB information
+# Database information
 DATABASE_URI = environ.get('DATABASE_URI', "")
 DATABASE_NAME = environ.get('DATABASE_NAME', "Cluster0")
 COLLECTION_NAME = environ.get('COLLECTION_NAME', 'mn_files')
+SQLDB = environ.get('SQLDB', environ.get('TURSO_DATABASE_URL', ""))
+TURSO_DATABASE_URL = environ.get('TURSO_DATABASE_URL', SQLDB)
+TURSO_AUTH_TOKEN = environ.get('TURSO_AUTH_TOKEN', "")
+TURSO_MAX_DB_BYTES = int(environ.get('TURSO_MAX_DB_BYTES', str(5 * 1024 * 1024 * 1024)))
 
 # File Channel Settings
 FILE_CHANNELS = [int(ch) for ch in environ.get('FILE_CHANNELS', '-1002831639976 -1002607076908 -1002869981026').split()]

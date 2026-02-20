@@ -23,7 +23,7 @@ BATCH_FILES = {}
 from datetime import datetime, timedelta
 import random
 
-AUTO_DELETE_SECONDS = 15  
+AUTO_DELETE_SECONDS = 15
 
 # Helper function to create buttons for specific channel
 async def create_file_buttons(client, sent_message):
@@ -73,6 +73,15 @@ async def auto_delete_file(client, message, delay):
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
 
+
+async def auto_delete_pm_media(client, message, delay):
+    await asyncio.sleep(delay)
+    try:
+        await message.delete()
+        logger.info(f"Deleted PM media {message.id} for user {message.chat.id}")
+    except Exception as e:
+        logger.error(f"Error deleting PM media: {e}")
+
 async def send_file_to_user(client, user_id, file_id, protect_content_flag, file_name=None, file_size=None, file_caption=None):
     try:
         # Generate proper caption
@@ -115,21 +124,23 @@ async def send_file_to_user(client, user_id, file_id, protect_content_flag, file
             asyncio.create_task(auto_delete_message(client, user_msg, AUTO_DELETE_SECONDS))
         else:
             # Fallback to direct send with caption
-            await client.send_cached_media(
+            sent_message = await client.send_cached_media(
                 chat_id=user_id,
                 file_id=file_id,
                 caption=caption,
                 protect_content=protect_content_flag,
             )
+            asyncio.create_task(auto_delete_pm_media(client, sent_message, FILE_AUTO_DELETE_SECONDS))
     except Exception as e:
         logger.error(f"File send error: {e}")
         # Fallback to direct send if channel send fails
-        await client.send_cached_media(
+        sent_message = await client.send_cached_media(
             chat_id=user_id,
             file_id=file_id,
             caption=caption,
             protect_content=protect_content_flag,
         )
+        asyncio.create_task(auto_delete_pm_media(client, sent_message, FILE_AUTO_DELETE_SECONDS))
 
 @Client.on_callback_query(filters.regex(r'^checksubp#') | filters.regex(r'^checksub#'))
 async def checksub_callback(client, callback_query):
@@ -445,7 +456,7 @@ async def channel_info(bot, message):
         else:
             text += '\n' + chat.title or chat.first_name
 
-    text += f'\n\n**Total:** {len(CHANNELS)}'
+    text += f'\n\n**Total:** {len(channels)}'
 
     if len(text) < 4096:
         await message.reply(text)

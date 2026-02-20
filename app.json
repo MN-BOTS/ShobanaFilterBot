@@ -55,8 +55,20 @@
             "required": false
         },
         "DATABASE_URI": {
-            "description": "mongoDB URI. Get this value from https://www.mongodb.com.",
-            "required": true
+            "description": "mongoDB URI. Required when SQLDB is not set.",
+            "required": false
+        },
+        "SQLDB": {
+            "description": "SQL DB string. Use sqlite path (sqlite:///data/bot.db) or Turso URL (libsql://your-db.turso.io).",
+            "required": false
+        },
+        "TURSO_DATABASE_URL": {
+            "description": "Optional alias for SQLDB. Example: libsql://your-db.turso.io",
+            "required": false
+        },
+        "TURSO_AUTH_TOKEN": {
+            "description": "Turso auth token. Add this in Koyeb environment variables.",
+            "required": false
         },
         "DATABASE_NAME": {
             "description": "Name of the database in mongoDB.",
