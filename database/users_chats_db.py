@@ -38,6 +38,7 @@ class Database:
     def __init__(self, uri, database_name):
         self.use_sql = USE_SQLDB
         self.use_libsql = USE_LIBSQL
+        self._schema_ready = False
 
         if not self.use_sql:
             self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
@@ -53,11 +54,12 @@ class Database:
                 conn.commit()
 
     async def _ensure_schema(self):
-        if not self.use_sql:
+        if not self.use_sql or self._schema_ready:
             return
         await db_execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT, is_banned INTEGER DEFAULT 0, ban_reason TEXT DEFAULT '')")
         await db_execute("CREATE TABLE IF NOT EXISTS groups (id INTEGER PRIMARY KEY, title TEXT, is_disabled INTEGER DEFAULT 0, reason TEXT DEFAULT '', settings TEXT)")
         await db_execute("CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT)")
+        self._schema_ready = True
 
     async def add_user(self, id, name):
         if not self.use_sql:
@@ -83,12 +85,14 @@ class Database:
         if not self.use_sql:
             await self.col.update_one({'id': id}, {'$set': {'ban_status': {'is_banned': False, 'ban_reason': ''}}})
             return
+        await self._ensure_schema()
         await db_execute("UPDATE users SET is_banned=0, ban_reason='' WHERE id=?", (int(id),))
 
     async def ban_user(self, user_id, ban_reason="No Reason"):
         if not self.use_sql:
             await self.col.update_one({'id': user_id}, {'$set': {'ban_status': {'is_banned': True, 'ban_reason': ban_reason}}})
             return
+        await self._ensure_schema()
         await db_execute("UPDATE users SET is_banned=1, ban_reason=? WHERE id=?", (str(ban_reason), int(user_id)))
 
     async def get_ban_status(self, id):
@@ -96,12 +100,14 @@ class Database:
         if not self.use_sql:
             user = await self.col.find_one({'id': int(id)})
             return default if not user else user.get('ban_status', default)
+        await self._ensure_schema()
         row = await db_fetchone("SELECT is_banned, ban_reason FROM users WHERE id=?", (int(id),))
         return default if not row else {'is_banned': bool(row['is_banned']), 'ban_reason': row['ban_reason'] or ''}
 
     async def get_all_users(self):
         if not self.use_sql:
             return self.col.find({})
+        await self._ensure_schema()
         rows = await db_fetchall("SELECT id FROM users")
         return _AsyncRows([{'id': r['id']} for r in rows])
 
@@ -109,6 +115,7 @@ class Database:
         if not self.use_sql:
             await self.col.delete_many({'id': int(user_id)})
             return
+        await self._ensure_schema()
         await db_execute("DELETE FROM users WHERE id=?", (int(user_id),))
 
     async def get_banned(self):
@@ -116,6 +123,7 @@ class Database:
             users = self.col.find({'ban_status.is_banned': True})
             chats = self.grp.find({'chat_status.is_disabled': True})
             return [u['id'] async for u in users], [c['id'] async for c in chats]
+        await self._ensure_schema()
         b_users = await db_fetchall("SELECT id FROM users WHERE is_banned=1")
         b_chats = await db_fetchall("SELECT id FROM groups WHERE is_disabled=1")
         return [r['id'] for r in b_users], [r['id'] for r in b_chats]
@@ -124,12 +132,14 @@ class Database:
         if not self.use_sql:
             await self.grp.insert_one({'id': chat, 'title': title, 'chat_status': {'is_disabled': False, 'reason': ''}})
             return
+        await self._ensure_schema()
         await db_execute("INSERT OR IGNORE INTO groups(id, title, is_disabled, reason, settings) VALUES (?, ?, 0, '', NULL)", (int(chat), str(title)))
 
     async def get_chat(self, chat):
         if not self.use_sql:
             v = await self.grp.find_one({'id': int(chat)})
             return False if not v else v.get('chat_status')
+        await self._ensure_schema()
         row = await db_fetchone("SELECT is_disabled, reason FROM groups WHERE id=?", (int(chat),))
         return False if not row else {'is_disabled': bool(row['is_disabled']), 'reason': row['reason'] or ''}
 
@@ -137,12 +147,14 @@ class Database:
         if not self.use_sql:
             await self.grp.update_one({'id': int(id)}, {'$set': {'chat_status': {'is_disabled': False, 'reason': ''}}})
             return
+        await self._ensure_schema()
         await db_execute("UPDATE groups SET is_disabled=0, reason='' WHERE id=?", (int(id),))
 
     async def update_settings(self, id, settings):
         if not self.use_sql:
             await self.grp.update_one({'id': int(id)}, {'$set': {'settings': settings}})
             return
+        await self._ensure_schema()
         await db_execute("UPDATE groups SET settings=? WHERE id=?", (json.dumps(settings), int(id)))
 
     async def get_settings(self, id):
@@ -158,6 +170,7 @@ class Database:
         if not self.use_sql:
             chat = await self.grp.find_one({'id': int(id)})
             return default if not chat else chat.get('settings', default)
+        await self._ensure_schema()
         row = await db_fetchone("SELECT settings FROM groups WHERE id=?", (int(id),))
         if not row or not row.get('settings'):
             return default
@@ -170,17 +183,20 @@ class Database:
         if not self.use_sql:
             await self.grp.update_one({'id': int(chat)}, {'$set': {'chat_status': {'is_disabled': True, 'reason': reason}}})
             return
+        await self._ensure_schema()
         await db_execute("UPDATE groups SET is_disabled=1, reason=? WHERE id=?", (str(reason), int(chat)))
 
     async def total_chat_count(self):
         if not self.use_sql:
             return await self.grp.count_documents({})
+        await self._ensure_schema()
         row = await db_fetchone("SELECT COUNT(*) as c FROM groups")
         return int(row['c']) if row else 0
 
     async def get_all_chats(self):
         if not self.use_sql:
             return self.grp.find({})
+        await self._ensure_schema()
         rows = await db_fetchall("SELECT id FROM groups")
         return _AsyncRows([{'id': r['id']} for r in rows])
 
@@ -188,12 +204,14 @@ class Database:
         if not self.use_sql:
             await self.config.update_one({'_id': 'auth_channels'}, {'$set': {'channels': channels}}, upsert=True)
             return
+        await self._ensure_schema()
         await db_execute("INSERT INTO config(key, value) VALUES('auth_channels', ?) ON CONFLICT(key) DO UPDATE SET value=excluded.value", (json.dumps(channels),))
 
     async def get_auth_channels(self) -> list[int]:
         if not self.use_sql:
             doc = await self.config.find_one({'_id': 'auth_channels'})
             return doc['channels'] if doc and 'channels' in doc else []
+        await self._ensure_schema()
         row = await db_fetchone("SELECT value FROM config WHERE key='auth_channels'")
         if not row:
             return []
