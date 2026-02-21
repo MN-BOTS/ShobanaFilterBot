@@ -72,104 +72,135 @@
 - `API_HASH`: Also from [Telegram Apps](https://my.telegram.org/apps).  
 - `CHANNELS`: Telegram channel/group usernames or IDs (space-separated).  
 - `ADMINS`: Admin usernames or IDs (space-separated).  
-- `DATABASE_URI`: MongoDB URI (required only when `SQLDB` is not set).  
+- `DATABASE_URI`: MongoDB URI (first priority if set).  
 - `DATABASE_NAME`: MongoDB database name.  
-- `SQLDB`: SQL database path (for example `sqlite:///data/bot.db`) to use SQL backend for users/connections/filters.  
-- `TURSO_DATABASE_URL`: Alias variable for `SQLDB`.  
-- `TURSO_AUTH_TOKEN`: Turso token variable (kept for Turso-ready setups).  
+- `POSTGRES_URI`: PostgreSQL connection URI used when `DATABASE_URI` is not set.  
 - `LOG_CHANNEL`: Telegram channel for activity logs.  
+
+### Database priority order
+1. `DATABASE_URI` (MongoDB)
+2. `POSTGRES_URI` (PostgreSQL SQL backend)
 
 ### Optional
 - `PICS`: Telegraph links for images in start message (space-separated).  
 - `FILE_STORE_CHANNEL`: Channels for file storage (space-separated).  
+- `POSTGRES_STORAGE_LIMIT_BYTES`: Optional PostgreSQL quota for accurate `/stats` free storage in SQL mode (supports formats like `1073741824`, `1024MB`, `1GB`).  
 - Refer to [info.py](https://github.com/mn-bots/ShobanaFilterBot/blob/main/info.py) for more details.
 
 ---
 
-## 🚀 Deployment
+## 🚀 Deployment (Beginner Friendly Full Guide)
 
-### Deploy to Koyeb
-<details><summary>Click to Expand</summary>
-<p>
-<a href="https://app.koyeb.com/deploy?type=git&repository=github.com/mn-bots/ShobanaFilterBot&env[BOT_TOKEN]&env[API_ID]&env[API_HASH]&env[CHANNELS]&env[ADMINS]&env[PICS]&env[LOG_CHANNEL]&env[AUTH_CHANNEL]&env[CUSTOM_FILE_CAPTION]&env[DATABASE_URI]&env[DATABASE_NAME]&env[COLLECTION_NAME]=Telegram_files&env[FILE_CHANNEL]=-1001832732995&env[SUPPORT_CHAT]&env[IMDB]=True&env[IMDB_TEMPLATE]&env[SINGLE_BUTTON]=True&env[AUTH_GROUPS]&env[P_TTI_SHOW_OFF]=True&branch=main&name=telegrambot">
- <img src="https://www.koyeb.com/static/images/deploy/button.svg" alt="Deploy to Koyeb">
-</a>
-</p>
-</details>
+This guide now supports only **two databases**:
+1. **MongoDB** (`DATABASE_URI`)
+2. **PostgreSQL** (`POSTGRES_URI`) when MongoDB is not set.
 
-### Full Tutorial: Deploy on Koyeb (SQL mode + Turso notes)
+---
 
-> **Where do I add Turso token?**  
-> Add it in **Koyeb → Service → Settings → Environment variables** as:  
-> `TURSO_AUTH_TOKEN=your_turso_token`
+### 1) Minimum environment variables
 
-> **Important note**  
-> Current SQL backend in this repository runs on SQLite engine (`sqlite:///...`).  
-> You can use direct Turso URL in `SQLDB` / `TURSO_DATABASE_URL` (example: `libsql://your-db.turso.io`).  
-> Make sure `TURSO_AUTH_TOKEN` is set in Koyeb environment variables and dependencies are installed from `requirements.txt`.
-> If Turso DNS/network is temporarily unavailable, bot now auto-falls back to local sqlite runtime DB (`data/turso_fallback.db`) instead of crashing.
+```env
+BOT_TOKEN=123456:ABC...
+API_ID=1234567
+API_HASH=xxxxxxxxxxxxxxxxxxxxxxxxxx
+ADMINS=123456789
+CHANNELS=-1001234567890
+LOG_CHANNEL=-1001234567890
+```
 
-1. **Create Turso database**
-   - Install and login to Turso CLI.
-   - Create a DB:
-     ```bash
-     turso db create shobana-bot
-     ```
-   - Get DB URL:
-     ```bash
-     turso db show shobana-bot --url
-     ```
-   - Create token:
-     ```bash
-     turso db tokens create shobana-bot
-     ```
+Then choose one DB method below.
 
-2. **Fork this repository**
-   - Fork this repo to your GitHub account.
-   - Keep your branch updated.
+---
 
-3. **Create service in Koyeb**
-   - Go to Koyeb → **Create Web Service** (or Worker, based on your setup).
-   - Select your forked GitHub repository.
-   - Branch: `main`.
-   - Runtime: Python (from `heroku/python` buildpack in this repo).
+### 2) MongoDB connection (recommended for beginners)
 
-4. **Set Koyeb environment variables**
-   - Required Telegram vars:
-     - `BOT_TOKEN`
-     - `API_ID`
-     - `API_HASH`
-     - `ADMINS`
-     - `CHANNELS`
-     - `LOG_CHANNEL`
-   - Database vars for Turso:
-     - `SQLDB=libsql://<your-db-name>.turso.io`
-       - or use `TURSO_DATABASE_URL=libsql://<your-db-name>.turso.io`
-     - `TURSO_AUTH_TOKEN=<your-generated-token>`
-   - Keep Mongo vars optional if you are using SQL mode.
+1. Create account: https://www.mongodb.com/cloud/atlas/register
+2. Create cluster.
+3. **Database Access** → create DB user.
+4. **Network Access** → allow your server IP.
+5. **Connect → Drivers** → copy URI.
+6. Set environment values:
 
-5. **Deploy**
-   - Click **Deploy** in Koyeb.
-   - Wait for build + start logs.
-   - Open Telegram and run `/start` to verify bot is live.
+```env
+DATABASE_URI=mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
+DATABASE_NAME=Cluster0
+COLLECTION_NAME=mn_files
+```
 
-6. **Troubleshooting**
-   - If DB auth fails, regenerate token and re-add `TURSO_AUTH_TOKEN`.
-   - Ensure `SQLDB`/`TURSO_DATABASE_URL` has correct `libsql://` host.
-   - Make sure bot is admin in channels configured in `CHANNELS`.
+Quick test:
+```python
+from pymongo import MongoClient
+uri = "mongodb+srv://<username>:<password>@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority"
+client = MongoClient(uri, serverSelectionTimeoutMS=5000)
+print(client.admin.command("ping"))
+```
 
-### Deploy to VPS
-<details>
-  <summary>Click to Expand</summary>
-  <p>
+---
 
-<pre>bash
-git clone https://github.com/mn-bots/ShobanaFilterBot
-# Install dependencies
-pip3 install -U -r requirements.txt
-# Configure variables in info.py and start the bot
-python3 bot.py</pre>
-</p> </details> <hr>
+### 3) PostgreSQL connection (exact format)
+
+You need:
+- host
+- port (`5432` usually)
+- database name
+- username
+- password
+
+URI format:
+```text
+postgresql+psycopg2://USERNAME:PASSWORD@HOST:5432/DATABASE_NAME
+```
+
+Example env:
+```env
+POSTGRES_URI=postgresql+psycopg2://bot_user:StrongPass@your-host:5432/shobana_bot
+```
+
+Create DB/user manually:
+```sql
+CREATE DATABASE shobana_bot;
+CREATE USER bot_user WITH ENCRYPTED PASSWORD 'StrongPass';
+GRANT ALL PRIVILEGES ON DATABASE shobana_bot TO bot_user;
+```
+
+Quick test:
+```python
+from sqlalchemy import create_engine, text
+engine = create_engine("postgresql+psycopg2://bot_user:StrongPass@your-host:5432/shobana_bot")
+with engine.connect() as c:
+    print(c.execute(text("SELECT 1")).scalar())
+```
+
+Important:
+- Leave `DATABASE_URI` empty if using PostgreSQL.
+- Set `POSTGRES_STORAGE_LIMIT_BYTES` to your provider quota (examples: `1GB`, `1024MB`, or raw bytes) if you want `/stats` free storage to show DB quota-based remaining space.
+- Do not set MySQL/SQLite/Turso variables (not used in this repo now).
+
+---
+
+### 4) Where to deploy
+
+- **Koyeb**: easiest for beginners
+- **Render**
+- **Railway**
+- **VPS** (advanced)
+
+For all platforms:
+1. Fork repo.
+2. Add env variables.
+3. Deploy.
+4. Verify bot with `/start`.
+
+---
+
+### 5) Common errors
+
+1. `DATABASE_URI` set but Mongo auth fails → recheck DB username/password and network access.
+2. PostgreSQL connection refused → check host/port/firewall/SSL requirements.
+3. Invalid PostgreSQL URI → ensure it starts with `postgresql+psycopg2://`.
+4. Bot not responding in channels → make bot admin in channels listed in `CHANNELS`.
+
+---
 
 💬 Support
 <p> <a href="https://telegram.dog/mnbots_support" target="_blank"> <img src="https://img.shields.io/badge/Telegram-Group-30302f?style=flat&logo=telegram" alt="Telegram Group"> </a> <a href="https://telegram.dog/MrMNTG" target="_blank"> <img src="https://img.shields.io/badge/Telegram-Channel-30302f?style=flat&logo=telegram" alt="Telegram Channel"> </a> </p> <hr>

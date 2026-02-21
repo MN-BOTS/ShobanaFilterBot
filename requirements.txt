@@ -57,3 +57,6 @@ ytthumb
 git+https://github.com/agronholm/anyio
 git+https://github.com/Joelkb/cinemagoer
 
+
+SQLAlchemy~=2.0.41
+psycopg2-binary==2.9.10

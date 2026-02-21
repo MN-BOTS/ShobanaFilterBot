@@ -13,6 +13,28 @@ def is_enabled(value, default):
     else:
         return default
 
+
+
+def parse_size_to_bytes(value: str, default: int = 0) -> int:
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if not raw:
+        return default
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([kmgtp]?b?)?", raw)
+    if not m:
+        return default
+    number = float(m.group(1))
+    unit = (m.group(2) or "b").rstrip("b")
+    scale = {
+        "": 1,
+        "k": 1024,
+        "m": 1024**2,
+        "g": 1024**3,
+        "t": 1024**4,
+        "p": 1024**5,
+    }
+    return int(number * scale.get(unit, 1))
 #Bot information
 SESSION = environ.get('SESSION', 'Media_search')
 API_ID = int(environ.get('API_ID', ''))
@@ -44,6 +66,8 @@ AUTH_GROUPS = [int(ch) for ch in auth_grp.split()] if auth_grp else None
 DATABASE_URI = environ.get('DATABASE_URI', "")
 DATABASE_NAME = environ.get('DATABASE_NAME', "Cluster0")
 COLLECTION_NAME = environ.get('COLLECTION_NAME', 'mn_files')
+POSTGRES_URI = environ.get('POSTGRES_URI', '')
+POSTGRES_STORAGE_LIMIT_BYTES = parse_size_to_bytes(environ.get('POSTGRES_STORAGE_LIMIT_BYTES', '1GB'), 0)
 
 # File Channel Settings
 FILE_CHANNELS = [int(ch) for ch in environ.get('FILE_CHANNELS', '-1002831639976 -1002607076908 -1002869981026').split()]

@@ -2,116 +2,157 @@
 #  @MrMNTG @MusammilN
 #please give credits https://github.com/MN-BOTS/ShobanaFilterBot
 import motor.motor_asyncio
-from info import DATABASE_NAME, DATABASE_URI, IMDB, IMDB_TEMPLATE, MELCOW_NEW_USERS, P_TTI_SHOW_OFF, SINGLE_BUTTON, SPELL_CHECK_REPLY, PROTECT_CONTENT
+from sqlalchemy import text
 
-#  @MrMNTG @MusammilN
-#please give credits https://github.com/MN-BOTS/ShobanaFilterBot
+from info import (
+    DATABASE_NAME,
+    DATABASE_URI,
+    IMDB,
+    IMDB_TEMPLATE,
+    MELCOW_NEW_USERS,
+    P_TTI_SHOW_OFF,
+    PROTECT_CONTENT,
+    SINGLE_BUTTON,
+    SPELL_CHECK_REPLY,
+)
+
+USE_MONGO = bool(DATABASE_URI)
+
+if not USE_MONGO:
+    from database.sql_store import store
+
 
 class Database:
-    
     def __init__(self, uri, database_name):
-        self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
-        self.db = self._client[database_name]
-        self.col = self.db.users
-        self.grp = self.db.groups
-        self.config = self.db.config
-
+        self.use_mongo = USE_MONGO
+        if self.use_mongo:
+            self._client = motor.motor_asyncio.AsyncIOMotorClient(uri)
+            self.db = self._client[database_name]
+            self.col = self.db.users
+            self.grp = self.db.groups
+            self.config = self.db.config
 
     def new_user(self, id, name):
-        return dict(
-            id = id,
-            name = name,
-            ban_status=dict(
-                is_banned=False,
-                ban_reason="",
-            ),
-        )
-
+        return dict(id=id, name=name, ban_status=dict(is_banned=False, ban_reason=""))
 
     def new_group(self, id, title):
-        return dict(
-            id = id,
-            title = title,
-            chat_status=dict(
-                is_disabled=False,
-                reason="",
-            ),
-        )
-    
+        return dict(id=id, title=title, chat_status=dict(is_disabled=False, reason=""))
+
     async def add_user(self, id, name):
-        user = self.new_user(id, name)
-        await self.col.insert_one(user)
-    
+        if self.use_mongo:
+            await self.col.insert_one(self.new_user(id, name))
+            return
+        with store.engine.begin() as conn:
+            exists = conn.execute(text("SELECT 1 FROM users WHERE id=:id"), {"id": int(id)}).first()
+            if not exists:
+                conn.execute(text("INSERT INTO users(id, name) VALUES (:id, :name)"), {"id": int(id), "name": name})
+
     async def is_user_exist(self, id):
-        user = await self.col.find_one({'id':int(id)})
-        return bool(user)
-    
+        if self.use_mongo:
+            return bool(await self.col.find_one({'id': int(id)}))
+        with store.engine.begin() as conn:
+            row = conn.execute(text("SELECT 1 FROM users WHERE id=:id"), {"id": int(id)}).first()
+            return bool(row)
+
     async def total_users_count(self):
-        count = await self.col.count_documents({})
-        return count
-    
+        if self.use_mongo:
+            return await self.col.count_documents({})
+        with store.engine.begin() as conn:
+            return int(conn.execute(text("SELECT COUNT(*) FROM users")).scalar() or 0)
+
     async def remove_ban(self, id):
-        ban_status = dict(
-            is_banned=False,
-            ban_reason=''
-        )
-        await self.col.update_one({'id': id}, {'$set': {'ban_status': ban_status}})
-    
+        if self.use_mongo:
+            await self.col.update_one({'id': id}, {'$set': {'ban_status': {'is_banned': False, 'ban_reason': ''}}})
+            return
+        with store.engine.begin() as conn:
+            conn.execute(text("UPDATE users SET ban_is_banned=FALSE, ban_reason='' WHERE id=:id"), {"id": int(id)})
+
     async def ban_user(self, user_id, ban_reason="No Reason"):
-        ban_status = dict(
-            is_banned=True,
-            ban_reason=ban_reason
-        )
-        await self.col.update_one({'id': user_id}, {'$set': {'ban_status': ban_status}})
+        if self.use_mongo:
+            await self.col.update_one({'id': user_id}, {'$set': {'ban_status': {'is_banned': True, 'ban_reason': ban_reason}}})
+            return
+        with store.engine.begin() as conn:
+            conn.execute(text("UPDATE users SET ban_is_banned=TRUE, ban_reason=:reason WHERE id=:id"), {"id": int(user_id), "reason": ban_reason})
 
     async def get_ban_status(self, id):
-        default = dict(
-            is_banned=False,
-            ban_reason=''
-        )
-        user = await self.col.find_one({'id':int(id)})
-        if not user:
-            return default
-        return user.get('ban_status', default)
+        default = dict(is_banned=False, ban_reason='')
+        if self.use_mongo:
+            user = await self.col.find_one({'id': int(id)})
+            return user.get('ban_status', default) if user else default
+        with store.engine.begin() as conn:
+            row = conn.execute(text("SELECT ban_is_banned, ban_reason FROM users WHERE id=:id"), {"id": int(id)}).first()
+            return dict(is_banned=bool(row[0]), ban_reason=row[1] or '') if row else default
 
     async def get_all_users(self):
-        return self.col.find({})
-    
+        if self.use_mongo:
+            return self.col.find({})
+
+        class AsyncRows:
+            def __aiter__(self_inner):
+                with store.engine.begin() as conn:
+                    self_inner.rows = conn.execute(text("SELECT id FROM users")).fetchall()
+                self_inner.idx = 0
+                return self_inner
+
+            async def __anext__(self_inner):
+                if self_inner.idx >= len(self_inner.rows):
+                    raise StopAsyncIteration
+                row = self_inner.rows[self_inner.idx]
+                self_inner.idx += 1
+                return {"id": row[0]}
+
+        return AsyncRows()
 
     async def delete_user(self, user_id):
-        await self.col.delete_many({'id': int(user_id)})
-
+        if self.use_mongo:
+            await self.col.delete_many({'id': int(user_id)})
+            return
+        with store.engine.begin() as conn:
+            conn.execute(text("DELETE FROM users WHERE id=:id"), {"id": int(user_id)})
 
     async def get_banned(self):
-        users = self.col.find({'ban_status.is_banned': True})
-        chats = self.grp.find({'chat_status.is_disabled': True})
-        b_chats = [chat['id'] async for chat in chats]
-        b_users = [user['id'] async for user in users]
-        return b_users, b_chats
-    
-
+        if self.use_mongo:
+            users = self.col.find({'ban_status.is_banned': True})
+            chats = self.grp.find({'chat_status.is_disabled': True})
+            b_chats = [chat['id'] async for chat in chats]
+            b_users = [user['id'] async for user in users]
+            return b_users, b_chats
+        with store.engine.begin() as conn:
+            b_users = [r[0] for r in conn.execute(text("SELECT id FROM users WHERE ban_is_banned=TRUE")).fetchall()]
+            b_chats = [r[0] for r in conn.execute(text("SELECT id FROM groups_data WHERE chat_is_disabled=TRUE")).fetchall()]
+            return b_users, b_chats
 
     async def add_chat(self, chat, title):
-        chat = self.new_group(chat, title)
-        await self.grp.insert_one(chat)
-    
+        if self.use_mongo:
+            await self.grp.insert_one(self.new_group(chat, title))
+            return
+        with store.engine.begin() as conn:
+            exists = conn.execute(text("SELECT 1 FROM groups_data WHERE id=:id"), {"id": int(chat)}).first()
+            if not exists:
+                conn.execute(text("INSERT INTO groups_data(id, title) VALUES (:id,:title)"), {"id": int(chat), "title": title})
 
     async def get_chat(self, chat):
-        chat = await self.grp.find_one({'id':int(chat)})
-        return False if not chat else chat.get('chat_status')
-    
+        if self.use_mongo:
+            found = await self.grp.find_one({'id': int(chat)})
+            return False if not found else found.get('chat_status')
+        with store.engine.begin() as conn:
+            row = conn.execute(text("SELECT chat_is_disabled, chat_reason FROM groups_data WHERE id=:id"), {"id": int(chat)}).first()
+            return False if not row else dict(is_disabled=bool(row[0]), reason=row[1] or '')
 
     async def re_enable_chat(self, id):
-        chat_status=dict(
-            is_disabled=False,
-            reason="",
-            )
-        await self.grp.update_one({'id': int(id)}, {'$set': {'chat_status': chat_status}})
-        
+        if self.use_mongo:
+            await self.grp.update_one({'id': int(id)}, {'$set': {'chat_status': {'is_disabled': False, 'reason': ''}}})
+            return
+        with store.engine.begin() as conn:
+            conn.execute(text("UPDATE groups_data SET chat_is_disabled=FALSE, chat_reason='' WHERE id=:id"), {"id": int(id)})
+
     async def update_settings(self, id, settings):
-        await self.grp.update_one({'id': int(id)}, {'$set': {'settings': settings}})
-        
-    
+        if self.use_mongo:
+            await self.grp.update_one({'id': int(id)}, {'$set': {'settings': settings}})
+            return
+        with store.engine.begin() as conn:
+            conn.execute(text("UPDATE groups_data SET settings=:settings WHERE id=:id"), {"id": int(id), "settings": store.to_json(settings)})
+
     async def get_settings(self, id):
         default = {
             'button': SINGLE_BUTTON,
@@ -120,49 +161,74 @@ class Database:
             'imdb': IMDB,
             'spell_check': SPELL_CHECK_REPLY,
             'welcome': MELCOW_NEW_USERS,
-            'template': IMDB_TEMPLATE
+            'template': IMDB_TEMPLATE,
         }
-        chat = await self.grp.find_one({'id':int(id)})
-        if chat:
-            return chat.get('settings', default)
-        return default
-    
+        if self.use_mongo:
+            chat = await self.grp.find_one({'id': int(id)})
+            return chat.get('settings', default) if chat else default
+        with store.engine.begin() as conn:
+            row = conn.execute(text("SELECT settings FROM groups_data WHERE id=:id"), {"id": int(id)}).first()
+            return store.from_json(row[0], default) if row else default
 
     async def disable_chat(self, chat, reason="No Reason"):
-        chat_status=dict(
-            is_disabled=True,
-            reason=reason,
-            )
-        await self.grp.update_one({'id': int(chat)}, {'$set': {'chat_status': chat_status}})
-    
+        if self.use_mongo:
+            await self.grp.update_one({'id': int(chat)}, {'$set': {'chat_status': {'is_disabled': True, 'reason': reason}}})
+            return
+        with store.engine.begin() as conn:
+            conn.execute(text("UPDATE groups_data SET chat_is_disabled=TRUE, chat_reason=:reason WHERE id=:id"), {"id": int(chat), "reason": reason})
 
     async def total_chat_count(self):
-        count = await self.grp.count_documents({})
-        return count
-    
+        if self.use_mongo:
+            return await self.grp.count_documents({})
+        with store.engine.begin() as conn:
+            return int(conn.execute(text("SELECT COUNT(*) FROM groups_data")).scalar() or 0)
 
     async def get_all_chats(self):
-        return self.grp.find({})
+        if self.use_mongo:
+            return self.grp.find({})
+
+        class AsyncRows:
+            def __aiter__(self_inner):
+                with store.engine.begin() as conn:
+                    self_inner.rows = conn.execute(text("SELECT id, title FROM groups_data")).fetchall()
+                self_inner.idx = 0
+                return self_inner
+
+            async def __anext__(self_inner):
+                if self_inner.idx >= len(self_inner.rows):
+                    raise StopAsyncIteration
+                row = self_inner.rows[self_inner.idx]
+                self_inner.idx += 1
+                return {"id": row[0], "title": row[1]}
+
+        return AsyncRows()
 
     async def set_auth_channels(self, channels: list[int]):
-        # Store the list of auth channel IDs in a singleton document
-        await self.config.update_one(
-            {"_id": "auth_channels"},
-            {"$set": {"channels": channels}},
-            upsert=True,
-        )
+        if self.use_mongo:
+            await self.config.update_one({"_id": "auth_channels"}, {"$set": {"channels": channels}}, upsert=True)
+            return
+        with store.engine.begin() as conn:
+            exists = conn.execute(text("SELECT 1 FROM config_data WHERE key_name='auth_channels'"), {}).first()
+            if exists:
+                conn.execute(text("UPDATE config_data SET value_json=:value WHERE key_name='auth_channels'"), {"value": store.to_json(channels)})
+            else:
+                conn.execute(text("INSERT INTO config_data(key_name, value_json) VALUES ('auth_channels', :value)"), {"value": store.to_json(channels)})
 
     async def get_auth_channels(self) -> list[int]:
-        doc = await self.config.find_one({"_id": "auth_channels"})
-        if doc and "channels" in doc:
-            return doc["channels"]
-        return []
+        if self.use_mongo:
+            doc = await self.config.find_one({"_id": "auth_channels"})
+            return doc["channels"] if doc and "channels" in doc else []
+        with store.engine.begin() as conn:
+            row = conn.execute(text("SELECT value_json FROM config_data WHERE key_name='auth_channels'"))
+            value = row.scalar()
+            return store.from_json(value, [])
 
     async def get_db_size(self):
-        return (await self.db.command("dbstats"))['dataSize']
+        if self.use_mongo:
+            return (await self.db.command("dbstats"))['dataSize']
+        with store.engine.begin() as conn:
+            size = conn.execute(text("SELECT pg_database_size(current_database())")).scalar()
+            return int(size or 0)
 
 
 db = Database(DATABASE_URI, DATABASE_NAME)
-
-#  @MrMNTG @MusammilN
-#please give credits https://github.com/MN-BOTS/ShobanaFilterBot
