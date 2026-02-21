@@ -65,14 +65,14 @@ class Database:
             await self.col.update_one({'id': id}, {'$set': {'ban_status': {'is_banned': False, 'ban_reason': ''}}})
             return
         with store.engine.begin() as conn:
-            conn.execute(text("UPDATE users SET ban_is_banned=0, ban_reason='' WHERE id=:id"), {"id": int(id)})
+            conn.execute(text("UPDATE users SET ban_is_banned=FALSE, ban_reason='' WHERE id=:id"), {"id": int(id)})
 
     async def ban_user(self, user_id, ban_reason="No Reason"):
         if self.use_mongo:
             await self.col.update_one({'id': user_id}, {'$set': {'ban_status': {'is_banned': True, 'ban_reason': ban_reason}}})
             return
         with store.engine.begin() as conn:
-            conn.execute(text("UPDATE users SET ban_is_banned=1, ban_reason=:reason WHERE id=:id"), {"id": int(user_id), "reason": ban_reason})
+            conn.execute(text("UPDATE users SET ban_is_banned=TRUE, ban_reason=:reason WHERE id=:id"), {"id": int(user_id), "reason": ban_reason})
 
     async def get_ban_status(self, id):
         default = dict(is_banned=False, ban_reason='')
@@ -118,8 +118,8 @@ class Database:
             b_users = [user['id'] async for user in users]
             return b_users, b_chats
         with store.engine.begin() as conn:
-            b_users = [r[0] for r in conn.execute(text("SELECT id FROM users WHERE ban_is_banned=1")).fetchall()]
-            b_chats = [r[0] for r in conn.execute(text("SELECT id FROM groups_data WHERE chat_is_disabled=1")).fetchall()]
+            b_users = [r[0] for r in conn.execute(text("SELECT id FROM users WHERE ban_is_banned=TRUE")).fetchall()]
+            b_chats = [r[0] for r in conn.execute(text("SELECT id FROM groups_data WHERE chat_is_disabled=TRUE")).fetchall()]
             return b_users, b_chats
 
     async def add_chat(self, chat, title):
@@ -144,7 +144,7 @@ class Database:
             await self.grp.update_one({'id': int(id)}, {'$set': {'chat_status': {'is_disabled': False, 'reason': ''}}})
             return
         with store.engine.begin() as conn:
-            conn.execute(text("UPDATE groups_data SET chat_is_disabled=0, chat_reason='' WHERE id=:id"), {"id": int(id)})
+            conn.execute(text("UPDATE groups_data SET chat_is_disabled=FALSE, chat_reason='' WHERE id=:id"), {"id": int(id)})
 
     async def update_settings(self, id, settings):
         if self.use_mongo:
@@ -175,7 +175,7 @@ class Database:
             await self.grp.update_one({'id': int(chat)}, {'$set': {'chat_status': {'is_disabled': True, 'reason': reason}}})
             return
         with store.engine.begin() as conn:
-            conn.execute(text("UPDATE groups_data SET chat_is_disabled=1, chat_reason=:reason WHERE id=:id"), {"id": int(chat), "reason": reason})
+            conn.execute(text("UPDATE groups_data SET chat_is_disabled=TRUE, chat_reason=:reason WHERE id=:id"), {"id": int(chat), "reason": reason})
 
     async def total_chat_count(self):
         if self.use_mongo:

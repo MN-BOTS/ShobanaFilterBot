@@ -36,8 +36,8 @@ async def add_connection(group_id, user_id):
         exists = conn.execute(text("SELECT 1 FROM connections WHERE user_id=:u AND group_id=:g"), {"u": user_id, "g": group_id}).first()
         if exists:
             return False
-        conn.execute(text("UPDATE connections SET is_active=0 WHERE user_id=:u"), {"u": user_id})
-        conn.execute(text("INSERT INTO connections(user_id, group_id, is_active) VALUES (:u,:g,1)"), {"u": user_id, "g": group_id})
+        conn.execute(text("UPDATE connections SET is_active=FALSE WHERE user_id=:u"), {"u": user_id})
+        conn.execute(text("INSERT INTO connections(user_id, group_id, is_active) VALUES (:u,:g,TRUE)"), {"u": user_id, "g": group_id})
     return True
 
 
@@ -50,7 +50,7 @@ async def active_connection(user_id):
         return int(group_id) if group_id is not None else None
 
     with store.engine.begin() as conn:
-        row = conn.execute(text("SELECT group_id FROM connections WHERE user_id=:u AND is_active=1"), {"u": user_id}).first()
+        row = conn.execute(text("SELECT group_id FROM connections WHERE user_id=:u AND is_active=TRUE"), {"u": user_id}).first()
         return int(row[0]) if row else None
 
 
@@ -70,7 +70,7 @@ async def if_active(user_id, group_id):
         return query is not None and query['active_group'] == group_id
 
     with store.engine.begin() as conn:
-        row = conn.execute(text("SELECT 1 FROM connections WHERE user_id=:u AND group_id=:g AND is_active=1"), {"u": user_id, "g": group_id}).first()
+        row = conn.execute(text("SELECT 1 FROM connections WHERE user_id=:u AND group_id=:g AND is_active=TRUE"), {"u": user_id, "g": group_id}).first()
         return bool(row)
 
 
@@ -80,8 +80,8 @@ async def make_active(user_id, group_id):
         return update.modified_count != 0
 
     with store.engine.begin() as conn:
-        conn.execute(text("UPDATE connections SET is_active=0 WHERE user_id=:u"), {"u": user_id})
-        res = conn.execute(text("UPDATE connections SET is_active=1 WHERE user_id=:u AND group_id=:g"), {"u": user_id, "g": group_id})
+        conn.execute(text("UPDATE connections SET is_active=FALSE WHERE user_id=:u"), {"u": user_id})
+        res = conn.execute(text("UPDATE connections SET is_active=TRUE WHERE user_id=:u AND group_id=:g"), {"u": user_id, "g": group_id})
         return res.rowcount != 0
 
 
@@ -91,7 +91,7 @@ async def make_inactive(user_id):
         return update.modified_count != 0
 
     with store.engine.begin() as conn:
-        res = conn.execute(text("UPDATE connections SET is_active=0 WHERE user_id=:u"), {"u": user_id})
+        res = conn.execute(text("UPDATE connections SET is_active=FALSE WHERE user_id=:u"), {"u": user_id})
         return res.rowcount != 0
 
 
@@ -116,9 +116,9 @@ async def delete_connection(user_id, group_id):
         res = conn.execute(text("DELETE FROM connections WHERE user_id=:u AND group_id=:g"), {"u": user_id, "g": group_id})
         if res.rowcount == 0:
             return False
-        active = conn.execute(text("SELECT 1 FROM connections WHERE user_id=:u AND is_active=1"), {"u": user_id}).first()
+        active = conn.execute(text("SELECT 1 FROM connections WHERE user_id=:u AND is_active=TRUE"), {"u": user_id}).first()
         if not active:
             latest = conn.execute(text("SELECT group_id FROM connections WHERE user_id=:u ORDER BY group_id DESC LIMIT 1"), {"u": user_id}).first()
             if latest:
-                conn.execute(text("UPDATE connections SET is_active=1 WHERE user_id=:u AND group_id=:g"), {"u": user_id, "g": latest[0]})
+                conn.execute(text("UPDATE connections SET is_active=TRUE WHERE user_id=:u AND group_id=:g"), {"u": user_id, "g": latest[0]})
         return True
