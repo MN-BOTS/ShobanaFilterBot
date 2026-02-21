@@ -1,5 +1,6 @@
 import logging
 import asyncio
+import time
 import random
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait
@@ -18,15 +19,22 @@ logger.setLevel(logging.INFO)
 lock = asyncio.Lock()
 
 # ─── tunables ────────────────────────────────────────────────────────────────
-BATCH_SIZE       = 1000   # messages fetched per "big batch"
-TG_CHUNK         = 200    # Telegram API max IDs per get_messages call
-PROGRESS_EVERY   = 1000   # update status message every N fetched
-SLEEP_MIN        = 3      # random sleep between batches – minimum seconds
-SLEEP_MAX        = 7      # random sleep between batches – maximum seconds
+BATCH_SIZE      = 5000    # IDs enqueued per producer iteration
+TG_CHUNK        = 200     # Telegram API hard max per get_messages call
+FETCH_WORKERS   = 4       # concurrent get_messages calls (tune: 3–6)
+SAVE_WORKERS    = 8       # concurrent save_file calls
+PROGRESS_EVERY  = 300.0     # seconds between status-message edits
+QUEUE_MAXSIZE   = 10      # max pending batches between producer and consumer
 # ─────────────────────────────────────────────────────────────────────────────
 
 CANCEL_MARKUP = InlineKeyboardMarkup(
     [[InlineKeyboardButton('Cancel', callback_data='index_cancel')]]
+)
+
+MEDIA_TYPES = (
+    enums.MessageMediaType.VIDEO,
+    enums.MessageMediaType.AUDIO,
+    enums.MessageMediaType.DOCUMENT,
 )
 
 
@@ -45,7 +53,6 @@ def _status_text(current, total_files, duplicate, deleted, no_media, unsupported
 
 
 async def _safe_edit(msg, text, reply_markup=None):
-    """Edit a message, silently ignore MessageNotModified."""
     try:
         await msg.edit_text(text, reply_markup=reply_markup)
     except Exception:
@@ -53,124 +60,140 @@ async def _safe_edit(msg, text, reply_markup=None):
 
 
 async def _flood_safe(coro):
-    """Await *coro*, retrying after any FloodWait automatically."""
+    """Retry a coroutine transparently on FloodWait."""
     while True:
         try:
             return await coro
         except FloodWait as fw:
-            logger.warning("FloodWait: sleeping %s s", fw.value)
+            logger.warning("FloodWait – sleeping %ss", fw.value)
             await asyncio.sleep(fw.value + 1)
 
 
-# ─── batch-fetch  ─────────────────────────────────────────────────────────────
+# ─── stage 1 : producer  (fetch) ─────────────────────────────────────────────
 
-async def _fetch_chunk(bot, chat, msg_ids: list):
+async def _fetch_worker(bot, chat, id_queue: asyncio.Queue,
+                        msg_queue: asyncio.Queue, sem: asyncio.Semaphore):
     """
-    Fetch up to TG_CHUNK message IDs in one API call with FloodWait handling.
-    Returns list[Message].
+    Pull a chunk of IDs from *id_queue*, fetch the messages, push the list
+    onto *msg_queue*. Runs FETCH_WORKERS copies concurrently.
     """
-    return await _flood_safe(bot.get_messages(chat, msg_ids))
+    while True:
+        chunk_ids = await id_queue.get()
+        if chunk_ids is None:          # sentinel
+            id_queue.task_done()
+            await msg_queue.put(None)  # forward sentinel to consumer
+            return
+        try:
+            async with sem:
+                messages = await _flood_safe(bot.get_messages(chat, chunk_ids))
+            if not isinstance(messages, list):
+                messages = [messages]
+            await msg_queue.put(messages)
+        except Exception as e:
+            logger.exception("Fetch error: %s", e)
+            await msg_queue.put([])    # push empty so consumer doesn't stall
+        finally:
+            id_queue.task_done()
 
 
-async def _process_batch(bot, chat, batch_ids: list):
-    """
-    Split *batch_ids* into TG_CHUNK groups, fetch concurrently, return flat
-    list of Message objects in original order.
-    """
-    chunks = [batch_ids[i:i + TG_CHUNK] for i in range(0, len(batch_ids), TG_CHUNK)]
-    results = await asyncio.gather(*[_fetch_chunk(bot, chat, c) for c in chunks])
-    # flatten while preserving order
-    messages = []
-    for group in results:
-        if isinstance(group, list):
-            messages.extend(group)
-        else:
-            messages.append(group)
-    return messages
+# ─── stage 2 : consumer  (save) ──────────────────────────────────────────────
+
+async def _classify(message):
+    """Return (media_object | None, counter_key)."""
+    if message is None or message.empty:
+        return None, 'deleted'
+    if not message.media:
+        return None, 'no_media'
+    if message.media not in MEDIA_TYPES:
+        return None, 'unsupported'
+    media = getattr(message, message.media.value, None)
+    if not media:
+        return None, 'unsupported'
+    media.file_type = message.media.value
+    media.caption   = message.caption
+    return media, None
 
 
-async def _save_media_batch(messages):
-    """
-    Filter eligible messages, save all concurrently, return counters dict.
-    """
-    counters = dict(total_files=0, duplicate=0, errors=0,
-                    deleted=0, no_media=0, unsupported=0)
+async def _save_concurrently(eligible):
+    """Save a list of media objects with SAVE_WORKERS concurrency."""
+    sem = asyncio.Semaphore(SAVE_WORKERS)
 
-    eligible = []
-    for message in messages:
-        if message is None or message.empty:
-            counters['deleted'] += 1
-            continue
-        if not message.media:
-            counters['no_media'] += 1
-            continue
-        if message.media not in (
-            enums.MessageMediaType.VIDEO,
-            enums.MessageMediaType.AUDIO,
-            enums.MessageMediaType.DOCUMENT,
-        ):
-            counters['unsupported'] += 1
-            continue
-        media = getattr(message, message.media.value, None)
-        if not media:
-            counters['unsupported'] += 1
-            continue
-        media.file_type = message.media.value
-        media.caption  = message.caption
-        eligible.append(media)
+    async def _one(media):
+        async with sem:
+            return await save_file(media)
 
-    if not eligible:
-        return counters
-
-    save_results = await asyncio.gather(
-        *[save_file(m) for m in eligible],
-        return_exceptions=True
-    )
-
-    for res in save_results:
+    results = await asyncio.gather(*[_one(m) for m in eligible],
+                                   return_exceptions=True)
+    total_files = duplicate = errors = 0
+    for res in results:
         if isinstance(res, Exception):
             logger.exception(res)
-            counters['errors'] += 1
+            errors += 1
         else:
             saved, code = res
             if saved:
-                counters['total_files'] += 1
+                total_files += 1
             elif code == 0:
-                counters['duplicate'] += 1
+                duplicate += 1
             elif code == 2:
-                counters['errors'] += 1
-
-    return counters
+                errors += 1
+    return total_files, duplicate, errors
 
 
 # ─── main indexing loop ───────────────────────────────────────────────────────
 
 async def index_files_to_db(lst_msg_id: int, chat, msg, bot):
-    total_files = 0
-    duplicate   = 0
-    errors      = 0
-    deleted     = 0
-    no_media    = 0
-    unsupported = 0
+    """
+    Fastest possible indexing:
+      • Producer: FETCH_WORKERS goroutines pump get_messages concurrently.
+      • Consumer: main loop drains msg_queue and saves in bulk.
+      • Progress: updated on a wall-clock timer, never blocking the hot path.
+    """
+    total_files = duplicate = errors = deleted = no_media = unsupported = 0
 
     async with lock:
         try:
-            current    = temp.CURRENT
             temp.CANCEL = False
-            start_id   = max(1, temp.CURRENT + 1)
+            start_id    = max(1, temp.CURRENT + 1)
+            current     = temp.CURRENT
 
-            # Build descending range: lst_msg_id … start_id
             all_ids = list(range(lst_msg_id, start_id - 1, -1))
-            logger.info("Indexing %d messages from %s (start=%d end=%d)",
-                        len(all_ids), chat, start_id, lst_msg_id)
+            total_ids = len(all_ids)
+            logger.info("Indexing %d messages from %s (ids %d→%d)",
+                        total_ids, chat, lst_msg_id, start_id)
 
-            big_batches = [
-                all_ids[i:i + BATCH_SIZE]
-                for i in range(0, len(all_ids), BATCH_SIZE)
+            # ── queues ────────────────────────────────────────────────────────
+            id_queue  = asyncio.Queue(maxsize=QUEUE_MAXSIZE * FETCH_WORKERS)
+            msg_queue = asyncio.Queue(maxsize=QUEUE_MAXSIZE)
+            sem       = asyncio.Semaphore(FETCH_WORKERS)
+
+            # ── start fetch workers ───────────────────────────────────────────
+            workers = [
+                asyncio.create_task(
+                    _fetch_worker(bot, chat, id_queue, msg_queue, sem)
+                )
+                for _ in range(FETCH_WORKERS)
             ]
 
-            for batch_num, batch_ids in enumerate(big_batches):
+            # ── enqueue all IDs in TG_CHUNK slices ───────────────────────────
+            async def _enqueue():
+                for i in range(0, total_ids, TG_CHUNK):
+                    await id_queue.put(all_ids[i:i + TG_CHUNK])
+                # send one sentinel per worker
+                for _ in range(FETCH_WORKERS):
+                    await id_queue.put(None)
+
+            enqueue_task = asyncio.create_task(_enqueue())
+
+            # ── consume ───────────────────────────────────────────────────────
+            last_edit    = time.monotonic()
+            done_workers = 0
+
+            while done_workers < FETCH_WORKERS:
                 if temp.CANCEL:
+                    enqueue_task.cancel()
+                    for w in workers:
+                        w.cancel()
                     await _safe_edit(
                         msg,
                         "✅ <b>Indexing Cancelled!</b>\n\n" +
@@ -179,53 +202,59 @@ async def index_files_to_db(lst_msg_id: int, chat, msg, bot):
                     )
                     return
 
-                # fetch all messages in this big batch (chunked internally)
-                messages = await _process_batch(bot, chat, batch_ids)
+                try:
+                    batch = await asyncio.wait_for(msg_queue.get(), timeout=2.0)
+                except asyncio.TimeoutError:
+                    continue
 
-                # save concurrently
-                c = await _save_media_batch(messages)
-                total_files += c['total_files']
-                duplicate   += c['duplicate']
-                errors      += c['errors']
-                deleted     += c['deleted']
-                no_media    += c['no_media']
-                unsupported += c['unsupported']
-                current     += len(batch_ids)
+                if batch is None:           # one worker finished
+                    done_workers += 1
+                    continue
 
-                # update progress
-                await _safe_edit(
-                    msg,
-                    f"⚡ <b>Batch {batch_num + 1}/{len(big_batches)}</b>\n\n" +
-                    _status_text(current, total_files, duplicate,
-                                 deleted, no_media, unsupported, errors),
-                    reply_markup=CANCEL_MARKUP
-                )
+                # classify
+                eligible = []
+                for message in batch:
+                    media, key = await _classify(message)
+                    if media:
+                        eligible.append(media)
+                    else:
+                        locals()[key] if False else None   # type: ignore
+                        # update counter by key
+                        if key == 'deleted':     deleted     += 1
+                        elif key == 'no_media':  no_media    += 1
+                        else:                    unsupported += 1
 
-                # random sleep between batches (skip after last one)
-                if batch_num < len(big_batches) - 1:
-                    sleep_time = random.uniform(SLEEP_MIN, SLEEP_MAX)
-                    logger.info("Batch %d done – sleeping %.1fs before next batch",
-                                batch_num + 1, sleep_time)
-                    await asyncio.sleep(sleep_time)
+                current += len(batch)
 
-        except FloodWait as fw:
-            # top-level safety net – inner calls handle their own FloodWaits
-            logger.warning("Top-level FloodWait %s s – waiting and will NOT resume automatically here", fw.value)
-            await msg.edit(
-                f"⚠️ FloodWait hit ({fw.value}s). Indexing paused.\n\n" +
-                _status_text(current, total_files, duplicate,
-                             deleted, no_media, unsupported, errors)
-            )
-            await asyncio.sleep(fw.value + 1)
-            # re-raise so lock is released cleanly; admin can restart
-            raise
+                # save
+                if eligible:
+                    tf, dup, err = await _save_concurrently(eligible)
+                    total_files += tf
+                    duplicate   += dup
+                    errors      += err
+
+                # progress (timer-gated)
+                now = time.monotonic()
+                if now - last_edit >= PROGRESS_EVERY:
+                    pct = int(current / max(total_ids, 1) * 100)
+                    await _safe_edit(
+                        msg,
+                        f"⚡ <b>Indexing… {pct}%</b>  "
+                        f"(<code>{current}</code>/<code>{total_ids}</code>)\n\n" +
+                        _status_text(current, total_files, duplicate,
+                                     deleted, no_media, unsupported, errors),
+                        reply_markup=CANCEL_MARKUP
+                    )
+                    last_edit = now
+
+            await enqueue_task          # make sure enqueuer finished cleanly
+            await asyncio.gather(*workers, return_exceptions=True)
 
         except Exception as e:
             logger.exception(e)
             await msg.edit(f'❌ Error: <code>{e}</code>')
             return
 
-    # success (outside lock so edit is not blocked)
     await _safe_edit(
         msg,
         "✅ <b>Indexing Complete!</b>\n\n" +
@@ -266,10 +295,7 @@ async def index_files(bot, query):
             reply_to_message_id=int(lst_msg_id)
         )
 
-    await msg.edit(
-        "⚡ Starting Indexing…",
-        reply_markup=CANCEL_MARKUP
-    )
+    await msg.edit("⚡ Starting Indexing…", reply_markup=CANCEL_MARKUP)
 
     try:
         chat = int(chat)
@@ -295,8 +321,8 @@ async def send_for_index(bot, message):
         match = regex.match(message.text)
         if not match:
             return await message.reply('Invalid link')
-        chat_id      = match.group(4)
-        last_msg_id  = int(match.group(5))
+        chat_id     = match.group(4)
+        last_msg_id = int(match.group(5))
         if chat_id.isnumeric():
             chat_id = int("-100" + chat_id)
     elif message.forward_from_chat and message.forward_from_chat.type == enums.ChatType.CHANNEL:
