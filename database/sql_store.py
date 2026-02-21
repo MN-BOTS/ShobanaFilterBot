@@ -53,6 +53,18 @@ class SQLStore:
             )
             """,
             """
+            CREATE TABLE IF NOT EXISTS media (
+                file_id TEXT PRIMARY KEY,
+                file_ref TEXT,
+                file_name TEXT NOT NULL,
+                file_size BIGINT NOT NULL,
+                file_type TEXT,
+                mime_type TEXT,
+                caption TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+            """,
+            """
             CREATE TABLE IF NOT EXISTS filters (
                 group_id BIGINT,
                 text_key TEXT,
