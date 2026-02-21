@@ -45,6 +45,7 @@ DATABASE_URI = environ.get('DATABASE_URI', "")
 DATABASE_NAME = environ.get('DATABASE_NAME', "Cluster0")
 COLLECTION_NAME = environ.get('COLLECTION_NAME', 'mn_files')
 POSTGRES_URI = environ.get('POSTGRES_URI', '')
+POSTGRES_STORAGE_LIMIT_BYTES = int(environ.get('POSTGRES_STORAGE_LIMIT_BYTES', '0'))
 
 # File Channel Settings
 FILE_CHANNELS = [int(ch) for ch in environ.get('FILE_CHANNELS', '-1002831639976 -1002607076908 -1002869981026').split()]

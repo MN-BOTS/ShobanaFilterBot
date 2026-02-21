@@ -1,8 +1,7 @@
-import shutil
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.errors.exceptions.bad_request_400 import MessageTooLong, PeerIdInvalid
-from info import ADMINS, LOG_CHANNEL, SUPPORT_CHAT, MELCOW_NEW_USERS, DATABASE_URI
+from info import ADMINS, LOG_CHANNEL, SUPPORT_CHAT, MELCOW_NEW_USERS, DATABASE_URI, POSTGRES_STORAGE_LIMIT_BYTES
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 from utils import get_size, temp, get_settings
@@ -150,11 +149,15 @@ async def get_stats(bot, message):
         files = await Media.count_documents()
         size = await db.get_db_size()
         if DATABASE_URI:
-            free = max(0, 536870912 - size)
+            free_value = max(0, 536870912 - size)
+            free = get_size(free_value)
         else:
-            _, _, free = shutil.disk_usage(".")
+            if POSTGRES_STORAGE_LIMIT_BYTES > 0:
+                free_value = max(0, POSTGRES_STORAGE_LIMIT_BYTES - size)
+                free = get_size(free_value)
+            else:
+                free = "Plan based (set POSTGRES_STORAGE_LIMIT_BYTES)"
         size = get_size(size)
-        free = get_size(free)
         await rju.edit(script.STATUS_TXT.format(files, total_users, totl_chats, size, free))
     else:
         k = await message.reply_text("<b>Sᴏʀʀʏ ᴛʜɪꜱ ᴄᴏᴍᴍᴀɴᴅ ᴏɴʟʏ ᴀᴅᴍɪɴꜱ</b>")        

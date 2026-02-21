@@ -84,6 +84,7 @@
 ### Optional
 - `PICS`: Telegraph links for images in start message (space-separated).  
 - `FILE_STORE_CHANNEL`: Channels for file storage (space-separated).  
+- `POSTGRES_STORAGE_LIMIT_BYTES`: Optional PostgreSQL quota in bytes for accurate `/stats` free storage in SQL mode.  
 - Refer to [info.py](https://github.com/mn-bots/ShobanaFilterBot/blob/main/info.py) for more details.
 
 ---
@@ -172,6 +173,7 @@ with engine.connect() as c:
 
 Important:
 - Leave `DATABASE_URI` empty if using PostgreSQL.
+- Set `POSTGRES_STORAGE_LIMIT_BYTES` to your provider quota (in bytes) if you want `/stats` free storage to show DB quota-based remaining space.
 - Do not set MySQL/SQLite/Turso variables (not used in this repo now).
 
 ---
