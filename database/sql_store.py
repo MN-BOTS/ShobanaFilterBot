@@ -25,7 +25,7 @@ class SQLStore:
             CREATE TABLE IF NOT EXISTS users (
                 id BIGINT PRIMARY KEY,
                 name TEXT,
-                ban_is_banned BOOLEAN DEFAULT 0,
+                ban_is_banned BOOLEAN DEFAULT FALSE,
                 ban_reason TEXT DEFAULT ''
             )
             """,
@@ -33,7 +33,7 @@ class SQLStore:
             CREATE TABLE IF NOT EXISTS groups_data (
                 id BIGINT PRIMARY KEY,
                 title TEXT,
-                chat_is_disabled BOOLEAN DEFAULT 0,
+                chat_is_disabled BOOLEAN DEFAULT FALSE,
                 chat_reason TEXT DEFAULT '',
                 settings TEXT
             )
@@ -48,7 +48,7 @@ class SQLStore:
             CREATE TABLE IF NOT EXISTS connections (
                 user_id BIGINT,
                 group_id BIGINT,
-                is_active BOOLEAN DEFAULT 0,
+                is_active BOOLEAN DEFAULT FALSE,
                 PRIMARY KEY (user_id, group_id)
             )
             """,
