@@ -23,7 +23,7 @@ BATCH_SIZE      = 5000    # IDs enqueued per producer iteration
 TG_CHUNK        = 200     # Telegram API hard max per get_messages call
 FETCH_WORKERS   = 4       # concurrent get_messages calls (tune: 3–6)
 SAVE_WORKERS    = 8       # concurrent save_file calls
-PROGRESS_EVERY  = 60.0     # seconds between status-message edits
+PROGRESS_EVERY  = 60.0    # seconds between status-message edits
 QUEUE_MAXSIZE   = 10      # max pending batches between producer and consumer
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -59,16 +59,23 @@ async def _safe_edit(msg, text, reply_markup=None):
         pass
 
 
-async def _flood_safe(coro, _max_retries: int = 10, status_msg=None):
+async def _flood_safe(coro_fn, _max_retries: int = 10, status_msg=None):
     """
-    Retry a coroutine transparently on:
+    Retry a coroutine *factory* (callable that returns a new coroutine each
+    time it is called) transparently on:
       • FloodWait  – edit status_msg with countdown, sleep, then auto-resume
       • OSError / ConnectionError (Connection lost, etc.) – exponential backoff
+
+    ⚠️  IMPORTANT: pass a callable, NOT an already-created coroutine.
+        ✅  _flood_safe(lambda: bot.get_messages(chat, ids))
+        ❌  _flood_safe(bot.get_messages(chat, ids))   ← causes "cannot reuse
+                                                          already awaited coroutine"
     """
     attempt = 0
     while True:
         try:
-            return await coro
+            # Call the factory to get a *fresh* coroutine on every attempt.
+            return await coro_fn()
         except FloodWait as fw:
             wait_sec = fw.value + 1
             logger.warning("FloodWait – sleeping %ss", wait_sec)
@@ -86,6 +93,8 @@ async def _flood_safe(coro, _max_retries: int = 10, status_msg=None):
                     status_msg,
                     "⚡ <b>Resuming indexing…</b>\n\nFloodWait is over.",
                 )
+            # Reset attempt counter after a FloodWait – the connection is fine.
+            attempt = 0
         except (OSError, ConnectionError, asyncio.TimeoutError) as e:
             attempt += 1
             if attempt > _max_retries:
@@ -117,8 +126,13 @@ async def _fetch_worker(bot, chat, id_queue: asyncio.Queue,
             return
         try:
             async with sem:
+                # ── FIX: pass a lambda so _flood_safe can create a *new*
+                #    coroutine on every retry attempt.  Passing the coroutine
+                #    object directly caused "cannot reuse already awaited
+                #    coroutine" because a coroutine is exhausted after the
+                #    first await, even when it raises an exception. ──────────
                 messages = await _flood_safe(
-                    bot.get_messages(chat, chunk_ids),
+                    lambda ids=chunk_ids: bot.get_messages(chat, ids),
                     status_msg=status_msg,
                 )
             if not isinstance(messages, list):
@@ -156,19 +170,31 @@ async def _classify(message):
 
 
 async def _save_concurrently(eligible):
-    """Save a list of media objects with SAVE_WORKERS concurrency."""
+    """
+    Save a list of media objects with SAVE_WORKERS concurrency.
+    Compatible with both MongoDB (motor) and PostgreSQL (asyncpg / SQLAlchemy
+    async) backends – save_file must return (saved: bool, code: int) where:
+        saved=True          → new record written
+        saved=False, code=0 → duplicate
+        saved=False, code=2 → error
+    """
     sem = asyncio.Semaphore(SAVE_WORKERS)
 
     async def _one(media):
         async with sem:
-            return await save_file(media)
+            try:
+                return await save_file(media)
+            except Exception as exc:
+                # Catch DB-level exceptions (MotorError, asyncpg exceptions,
+                # SQLAlchemy exceptions, etc.) uniformly.
+                logger.exception("save_file raised unexpectedly: %s", exc)
+                return exc   # treat as exception result in gather
 
     results = await asyncio.gather(*[_one(m) for m in eligible],
                                    return_exceptions=True)
     total_files = duplicate = errors = 0
     for res in results:
         if isinstance(res, Exception):
-            logger.exception(res)
             errors += 1
         else:
             saved, code = res
@@ -189,6 +215,8 @@ async def index_files_to_db(lst_msg_id: int, chat, msg, bot):
       • Producer: FETCH_WORKERS goroutines pump get_messages concurrently.
       • Consumer: main loop drains msg_queue and saves in bulk.
       • Progress: updated on a wall-clock timer, never blocking the hot path.
+    Works with both MongoDB (motor) and PostgreSQL (asyncpg/SQLAlchemy) via
+    the save_file abstraction in database/ia_filterdb.
     """
     total_files = duplicate = errors = deleted = no_media = unsupported = 0
 
@@ -198,7 +226,7 @@ async def index_files_to_db(lst_msg_id: int, chat, msg, bot):
             start_id    = max(1, temp.CURRENT + 1)
             current     = temp.CURRENT
 
-            all_ids = list(range(lst_msg_id, start_id - 1, -1))
+            all_ids   = list(range(lst_msg_id, start_id - 1, -1))
             total_ids = len(all_ids)
             logger.info("Indexing %d messages from %s (ids %d→%d)",
                         total_ids, chat, lst_msg_id, start_id)
@@ -259,12 +287,12 @@ async def index_files_to_db(lst_msg_id: int, chat, msg, bot):
                     media, key = await _classify(message)
                     if media:
                         eligible.append(media)
+                    elif key == 'deleted':
+                        deleted     += 1
+                    elif key == 'no_media':
+                        no_media    += 1
                     else:
-                        locals()[key] if False else None   # type: ignore
-                        # update counter by key
-                        if key == 'deleted':     deleted     += 1
-                        elif key == 'no_media':  no_media    += 1
-                        else:                    unsupported += 1
+                        unsupported += 1
 
                 current += len(batch)
 
