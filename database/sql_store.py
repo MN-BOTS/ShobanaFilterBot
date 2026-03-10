@@ -117,6 +117,10 @@ class SQLStore:
                 PRIMARY KEY (group_id, text_key)
             )
             """,
+            "CREATE INDEX IF NOT EXISTS idx_media_created_at ON media (created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_media_file_type_created ON media (file_type, created_at DESC)",
+            "CREATE INDEX IF NOT EXISTS idx_filters_group_id ON filters (group_id)",
+            "CREATE INDEX IF NOT EXISTS idx_connections_user_active ON connections (user_id, is_active)",
         ]
         with self.begin() as conn:
             for stmt in statements:

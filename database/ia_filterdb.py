@@ -362,3 +362,184 @@ async def get_series_grouped(limit=30):
         title: sorted(set(eps))[:10]
         for title, eps in grouped.items() if eps
     }
+
+# SQL fast-path overrides
+
+def _sql_row_to_doc(row):
+    return SQLMediaDoc(
+        dict(
+            file_id=row[0],
+            _id=row[0],
+            file_ref=row[1],
+            file_name=row[2],
+            file_size=row[3],
+            file_type=row[4],
+            mime_type=row[5],
+            caption=row[6],
+            created_at=row[7],
+        )
+    )
+
+
+async def get_search_results(query, file_type=None, max_results=10, offset=0, filter=False):
+    """For given query return (results, next_offset)"""
+
+    query = query.strip()
+    if not USE_MONGO:
+        terms = [t for t in query.split() if t]
+        where = []
+        params = {"offset": int(offset), "limit": int(max_results)}
+
+        if file_type:
+            where.append("file_type = :file_type")
+            params["file_type"] = file_type
+
+        if terms:
+            term_sql = []
+            for idx, term in enumerate(terms):
+                key = f"term_{idx}"
+                params[key] = f"%{term}%"
+                if USE_CAPTION_FILTER:
+                    term_sql.append(f"(file_name ILIKE :{key} OR COALESCE(caption, '') ILIKE :{key})")
+                else:
+                    term_sql.append(f"file_name ILIKE :{key}")
+            where.append(" AND ".join(term_sql))
+
+        where_clause = " AND ".join(where) if where else "TRUE"
+
+        with store.begin() as conn:
+            total_results = int(conn.execute(text(f"SELECT COUNT(*) FROM media WHERE {where_clause}"), params).scalar() or 0)
+            rows = conn.execute(
+                text(
+                    f"""
+                    SELECT file_id, file_ref, file_name, file_size, file_type, mime_type, caption, created_at
+                    FROM media
+                    WHERE {where_clause}
+                    ORDER BY created_at DESC
+                    OFFSET :offset LIMIT :limit
+                    """
+                ),
+                params,
+            ).fetchall()
+
+        files = [_sql_row_to_doc(row) for row in rows]
+        next_offset = offset + max_results
+        if next_offset >= total_results:
+            next_offset = ''
+        return files, next_offset, total_results
+
+    if not query:
+        raw_pattern = '.'
+    elif ' ' not in query:
+        raw_pattern = r'(\b|[\.\+\-_])' + query + r'(\b|[\.\+\-_])'
+    else:
+        raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
+
+    try:
+        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+    except Exception:
+        return []
+
+    if USE_CAPTION_FILTER:
+        filter = {'$or': [{'file_name': regex}, {'caption': regex}]}
+    else:
+        filter = {'file_name': regex}
+
+    if file_type:
+        filter['file_type'] = file_type
+
+    total_results = await Media.count_documents(filter)
+    next_offset = offset + max_results
+
+    if next_offset > total_results:
+        next_offset = ''
+
+    cursor = Media.find(filter)
+    cursor.sort('$natural', -1)
+    cursor.skip(offset).limit(max_results)
+    files = await cursor.to_list(length=max_results)
+
+    return files, next_offset, total_results
+
+
+async def get_file_details(query):
+    if not USE_MONGO:
+        with store.begin() as conn:
+            row = conn.execute(
+                text(
+                    "SELECT file_id, file_ref, file_name, file_size, file_type, mime_type, caption, created_at "
+                    "FROM media WHERE file_id=:file_id LIMIT 1"
+                ),
+                {"file_id": query},
+            ).first()
+        return [_sql_row_to_doc(row)] if row else []
+
+    filter = {'file_id': query}
+    cursor = Media.find(filter)
+    filedetails = await cursor.to_list(length=1)
+    return filedetails
+
+
+async def get_movie_list(limit=20):
+    if not USE_MONGO:
+        with store.begin() as conn:
+            rows = conn.execute(text("SELECT file_name FROM media ORDER BY created_at DESC LIMIT 300")).fetchall()
+        results = []
+        for row in rows:
+            name = row[0] or ""
+            if not re.search(r"(s\d{1,2}|season\s*\d+).*?(e\d{1,2}|episode\s*\d+)", name, re.I):
+                results.append(name)
+            if len(results) >= limit:
+                break
+        return results
+
+    cursor = Media.find().sort("$natural", -1).limit(100)
+    files = await cursor.to_list(length=100)
+    results = []
+
+    for file in files:
+        name = getattr(file, "file_name", "")
+        if not re.search(r"(s\d{1,2}|season\s*\d+).*?(e\d{1,2}|episode\s*\d+)", name, re.I):
+            results.append(name)
+        if len(results) >= limit:
+            break
+    return results
+
+
+async def get_series_grouped(limit=30):
+    if not USE_MONGO:
+        with store.begin() as conn:
+            rows = conn.execute(text("SELECT file_name FROM media ORDER BY created_at DESC LIMIT 500")).fetchall()
+        grouped = defaultdict(list)
+
+        for row in rows:
+            name = row[0] or ""
+            match = re.search(r"(.*?)(?:S\d{1,2}|Season\s*\d+).*?(?:E|Ep|Episode)?(\d{1,2})", name, re.I)
+            if match:
+                title = match.group(1).strip().title()
+                episode = int(match.group(2))
+                grouped[title].append(episode)
+            if len(grouped) >= limit:
+                break
+
+        return {
+            title: sorted(set(eps))[:10]
+            for title, eps in grouped.items() if eps
+        }
+
+    cursor = Media.find().sort("$natural", -1).limit(150)
+    files = await cursor.to_list(length=150)
+    grouped = defaultdict(list)
+
+    for file in files:
+        name = getattr(file, "file_name", "")
+        match = re.search(r"(.*?)(?:S\d{1,2}|Season\s*\d+).*?(?:E|Ep|Episode)?(\d{1,2})", name, re.I)
+        if match:
+            title = match.group(1).strip().title()
+            episode = int(match.group(2))
+            grouped[title].append(episode)
+
+    return {
+        title: sorted(set(eps))[:10]
+        for title, eps in grouped.items() if eps
+    }
