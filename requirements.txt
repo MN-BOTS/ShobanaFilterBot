@@ -28,7 +28,7 @@ psutil>=5.9.0
 pycryptodome
 pygments
 pyromod
-pymongo==4.6.3  
+pymongo==3.12.3  
 motor==2.5.1 
 marshmallow==3.26.2
 umongo==3.0.1
