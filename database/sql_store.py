@@ -1,6 +1,10 @@
 import json
 import logging
+import time
+from contextlib import contextmanager
+
 from sqlalchemy import create_engine, text
+from sqlalchemy.exc import OperationalError
 
 from info import POSTGRES_URI
 
@@ -16,8 +20,46 @@ def _resolve_db_url() -> str:
 class SQLStore:
     def __init__(self):
         self.url = _resolve_db_url()
-        self.engine = create_engine(self.url, future=True)
+        self.engine = create_engine(
+            self.url,
+            future=True,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            pool_size=5,
+            max_overflow=10,
+            pool_timeout=30,
+            connect_args={
+                "connect_timeout": 10,
+                "application_name": "ShobanaFilterBot",
+                "keepalives": 1,
+                "keepalives_idle": 30,
+                "keepalives_interval": 10,
+                "keepalives_count": 5,
+            },
+        )
         self._ensure_tables()
+
+    @contextmanager
+    def begin(self, retries: int = 3, retry_delay: float = 1.0):
+        last_error = None
+        for attempt in range(1, retries + 1):
+            try:
+                with self.engine.begin() as conn:
+                    yield conn
+                    return
+            except OperationalError as err:
+                last_error = err
+                logger.warning(
+                    "PostgreSQL operation failed (attempt %s/%s): %s",
+                    attempt,
+                    retries,
+                    err,
+                )
+                self.engine.dispose()
+                if attempt < retries:
+                    time.sleep(retry_delay)
+        if last_error:
+            raise last_error
 
     def _ensure_tables(self):
         statements = [
@@ -76,7 +118,7 @@ class SQLStore:
             )
             """,
         ]
-        with self.engine.begin() as conn:
+        with self.begin() as conn:
             for stmt in statements:
                 conn.execute(text(stmt))
 

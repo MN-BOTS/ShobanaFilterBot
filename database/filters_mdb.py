@@ -26,7 +26,7 @@ async def add_filter(grp_id, text_key, reply_text, btn, file, alert):
         mycol.update_one({'text': str(text_key)}, {"$set": data}, upsert=True)
         return
 
-    with store.engine.begin() as conn:
+    with store.begin() as conn:
         exists = conn.execute(text("SELECT 1 FROM filters WHERE group_id=:g AND text_key=:t"), {"g": grp_id, "t": str(text_key)}).first()
         params = {"g": grp_id, "t": str(text_key), "r": str(reply_text), "b": str(btn), "f": str(file), "a": str(alert)}
         if exists:
@@ -49,7 +49,7 @@ async def find_filter(group_id, name):
         except Exception:
             return None, None, None, None
 
-    with store.engine.begin() as conn:
+    with store.begin() as conn:
         row = conn.execute(text("SELECT reply_text, btn, alert, file_id FROM filters WHERE group_id=:g AND text_key=:t"), {"g": group_id, "t": name}).first()
         return (row[0], row[1], row[2], row[3]) if row else (None, None, None, None)
 
@@ -59,7 +59,7 @@ async def get_filters(group_id):
         mycol = mydb[str(group_id)]
         return [file['text'] for file in mycol.find()]
 
-    with store.engine.begin() as conn:
+    with store.begin() as conn:
         return [r[0] for r in conn.execute(text("SELECT text_key FROM filters WHERE group_id=:g"), {"g": group_id}).fetchall()]
 
 
@@ -74,7 +74,7 @@ async def delete_filter(message, text_key, group_id):
             await message.reply_text("Couldn't find that filter!", quote=True)
         return
 
-    with store.engine.begin() as conn:
+    with store.begin() as conn:
         res = conn.execute(text("DELETE FROM filters WHERE group_id=:g AND text_key=:t"), {"g": group_id, "t": text_key})
     if res.rowcount:
         await message.reply_text(f"'`{text_key}`'  deleted. I'll not respond to that filter anymore.", quote=True, parse_mode=enums.ParseMode.MARKDOWN)
@@ -91,7 +91,7 @@ async def del_all(message, group_id, title):
         await message.edit_text(f"All filters from {title} has been removed")
         return
 
-    with store.engine.begin() as conn:
+    with store.begin() as conn:
         count = conn.execute(text("SELECT COUNT(*) FROM filters WHERE group_id=:g"), {"g": group_id}).scalar() or 0
         if count == 0:
             await message.edit_text(f"Nothing to remove in {title}!")
@@ -106,7 +106,7 @@ async def count_filters(group_id):
         count = mycol.count()
         return False if count == 0 else count
 
-    with store.engine.begin() as conn:
+    with store.begin() as conn:
         count = int(conn.execute(text("SELECT COUNT(*) FROM filters WHERE group_id=:g"), {"g": group_id}).scalar() or 0)
         return False if count == 0 else count
 
@@ -121,7 +121,7 @@ async def filter_stats():
             totalcount += mydb[collection].count()
         return len(collections), totalcount
 
-    with store.engine.begin() as conn:
+    with store.begin() as conn:
         totalcollections = int(conn.execute(text("SELECT COUNT(DISTINCT group_id) FROM filters")).scalar() or 0)
         totalcount = int(conn.execute(text("SELECT COUNT(*) FROM filters")).scalar() or 0)
         return totalcollections, totalcount

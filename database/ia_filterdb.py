@@ -102,7 +102,7 @@ def _match_filter(doc, query):
 
 class SQLMediaCollection:
     async def _all_docs(self):
-        with store.engine.begin() as conn:
+        with store.begin() as conn:
             rows = conn.execute(text("SELECT file_id, file_ref, file_name, file_size, file_type, mime_type, caption, created_at FROM media")).fetchall()
         docs = []
         for r in rows:
@@ -130,7 +130,7 @@ class SQLMediaCollection:
         ids = [d['file_id'] for d in docs]
         if not ids:
             return SQLDeleteResult(0)
-        with store.engine.begin() as conn:
+        with store.begin() as conn:
             for fid in ids:
                 conn.execute(text("DELETE FROM media WHERE file_id=:fid"), {"fid": fid})
         return SQLDeleteResult(len(ids))
@@ -140,12 +140,12 @@ class SQLMediaCollection:
         if not docs:
             return SQLDeleteResult(0)
         fid = docs[0]['file_id']
-        with store.engine.begin() as conn:
+        with store.begin() as conn:
             conn.execute(text("DELETE FROM media WHERE file_id=:fid"), {"fid": fid})
         return SQLDeleteResult(1)
 
     async def drop(self):
-        with store.engine.begin() as conn:
+        with store.begin() as conn:
             conn.execute(text("DELETE FROM media"))
 
 
@@ -170,7 +170,7 @@ if USE_MONGO:
 
 else:
     def _load_docs_sync(query=None):
-        with store.engine.begin() as conn:
+        with store.begin() as conn:
             rows = conn.execute(text("SELECT file_id, file_ref, file_name, file_size, file_type, mime_type, caption, created_at FROM media")).fetchall()
         docs = []
         for r in rows:
@@ -226,7 +226,7 @@ async def save_file(media):
                 logger.info(f'{getattr(media, "file_name", "NO_FILE")} is saved to database')
                 return True, 1
 
-    with store.engine.begin() as conn:
+    with store.begin() as conn:
         exists = conn.execute(text("SELECT 1 FROM media WHERE file_id=:fid"), {"fid": file_id}).first()
         if exists:
             return False, 0
