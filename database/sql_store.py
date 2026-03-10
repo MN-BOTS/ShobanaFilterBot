@@ -25,8 +25,8 @@ class SQLStore:
             future=True,
             pool_pre_ping=True,
             pool_recycle=300,
-            pool_size=10,
-            max_overflow=20,
+            pool_size=5,
+            max_overflow=10,
             pool_timeout=30,
             connect_args={
                 "connect_timeout": 10,
@@ -122,15 +122,7 @@ class SQLStore:
             "CREATE INDEX IF NOT EXISTS idx_filters_group_id ON filters (group_id)",
             "CREATE INDEX IF NOT EXISTS idx_connections_user_active ON connections (user_id, is_active)",
         ]
-
         with self.begin() as conn:
-            try:
-                conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm"))
-                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_media_file_name_trgm ON media USING gin (file_name gin_trgm_ops)"))
-                conn.execute(text("CREATE INDEX IF NOT EXISTS idx_media_caption_trgm ON media USING gin (caption gin_trgm_ops)"))
-            except Exception as err:
-                logger.info("Skipping pg_trgm indexes: %s", err)
-
             for stmt in statements:
                 conn.execute(text(stmt))
 
