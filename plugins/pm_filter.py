@@ -9,8 +9,11 @@ from Script import script
 import pyrogram
 from database.connections_mdb import active_connection, all_connections, delete_connection, if_active, make_active, \
     make_inactive
-from info import ADMINS, AUTH_USERS, CUSTOM_FILE_CAPTION, AUTH_GROUPS, P_TTI_SHOW_OFF, IMDB, \
-    SINGLE_BUTTON, SPELL_CHECK_REPLY, IMDB_TEMPLATE, DATABASE_URI, POSTGRES_STORAGE_LIMIT_BYTES
+from info import (
+    ADMINS, AUTH_USERS, CUSTOM_FILE_CAPTION, AUTH_GROUPS, P_TTI_SHOW_OFF, IMDB,
+    SINGLE_BUTTON, SPELL_CHECK_REPLY, IMDB_TEMPLATE, DATABASE_URI, DATABASE_URI2, DATABASE_URI3, DATABASE_URI4, DATABASE_URI5,
+    POSTGRES_STORAGE_LIMIT_BYTES,
+)
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, UserIsBlocked, MessageNotModified, PeerIdInvalid
@@ -29,6 +32,8 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
 
 BUTTONS = {}
+MONGO_DB_CAP_BYTES = 536870912
+MONGO_DB_COUNT = len([u for u in (DATABASE_URI, DATABASE_URI2, DATABASE_URI3, DATABASE_URI4, DATABASE_URI5) if u])
 SPELL_CHECK = {}
 
 
@@ -579,7 +584,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
         chats = await db.total_chat_count()
         monsize = await db.get_db_size()
         if DATABASE_URI:
-            free_value = max(0, 536870912 - monsize)
+            free_value = max(0, (MONGO_DB_CAP_BYTES * max(MONGO_DB_COUNT, 1)) - monsize)
             free = get_size(free_value)
         else:
             if POSTGRES_STORAGE_LIMIT_BYTES > 0:
@@ -606,7 +611,7 @@ async def cb_handler(client: Client, query: CallbackQuery):
         chats = await db.total_chat_count()
         monsize = await db.get_db_size()
         if DATABASE_URI:
-            free_value = max(0, 536870912 - monsize)
+            free_value = max(0, (MONGO_DB_CAP_BYTES * max(MONGO_DB_COUNT, 1)) - monsize)
             free = get_size(free_value)
         else:
             if POSTGRES_STORAGE_LIMIT_BYTES > 0:

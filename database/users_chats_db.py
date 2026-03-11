@@ -1,12 +1,21 @@
 # https://github.com/odysseusmax/animated-lamp/blob/master/bot/database/database.py
 #  @MrMNTG @MusammilN
 #please give credits https://github.com/MN-BOTS/ShobanaFilterBot
+import asyncio
 import motor.motor_asyncio
 from sqlalchemy import text
 
 from info import (
     DATABASE_NAME,
     DATABASE_URI,
+    DATABASE_URI2,
+    DATABASE_URI3,
+    DATABASE_URI4,
+    DATABASE_URI5,
+    DATABASE_NAME2,
+    DATABASE_NAME3,
+    DATABASE_NAME4,
+    DATABASE_NAME5,
     IMDB,
     IMDB_TEMPLATE,
     MELCOW_NEW_USERS,
@@ -31,6 +40,27 @@ class Database:
             self.col = self.db.users
             self.grp = self.db.groups
             self.config = self.db.config
+
+            # Optional media shards can use additional DBs; /stats should include
+            # size usage across configured Mongo databases.
+            mongo_defs = [
+                (DATABASE_URI, DATABASE_NAME),
+                (DATABASE_URI2, DATABASE_NAME2),
+                (DATABASE_URI3, DATABASE_NAME3),
+                (DATABASE_URI4, DATABASE_NAME4),
+                (DATABASE_URI5, DATABASE_NAME5),
+            ]
+            seen = set()
+            self._mongo_dbs = []
+            for db_uri, db_name in mongo_defs:
+                if not db_uri:
+                    continue
+                key = (db_uri.strip(), (db_name or database_name).strip())
+                if key in seen:
+                    continue
+                seen.add(key)
+                client = self._client if key[0] == uri else motor.motor_asyncio.AsyncIOMotorClient(key[0])
+                self._mongo_dbs.append(client[key[1]])
 
     def new_user(self, id, name):
         return dict(id=id, name=name, ban_status=dict(is_banned=False, ban_reason=""))
@@ -225,7 +255,10 @@ class Database:
 
     async def get_db_size(self):
         if self.use_mongo:
-            return (await self.db.command("dbstats"))['dataSize']
+            if not getattr(self, '_mongo_dbs', None):
+                return int((await self.db.command("dbstats")).get('dataSize', 0))
+            stats = await asyncio.gather(*[db.command("dbstats") for db in self._mongo_dbs])
+            return int(sum(s.get('dataSize', 0) for s in stats))
         with store.begin() as conn:
             size = conn.execute(text("SELECT pg_database_size(current_database())")).scalar()
             return int(size or 0)

@@ -1,12 +1,18 @@
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 from pyrogram.errors.exceptions.bad_request_400 import MessageTooLong, PeerIdInvalid
-from info import ADMINS, LOG_CHANNEL, SUPPORT_CHAT, MELCOW_NEW_USERS, DATABASE_URI, POSTGRES_STORAGE_LIMIT_BYTES
+from info import (
+    ADMINS, LOG_CHANNEL, SUPPORT_CHAT, MELCOW_NEW_USERS, DATABASE_URI, DATABASE_URI2, DATABASE_URI3, DATABASE_URI4, DATABASE_URI5,
+    POSTGRES_STORAGE_LIMIT_BYTES,
+)
 from database.users_chats_db import db
 from database.ia_filterdb import Media
 from utils import get_size, temp, get_settings
 from Script import script
 from pyrogram.errors import ChatAdminRequired
+
+MONGO_DB_CAP_BYTES = 536870912
+MONGO_DB_COUNT = len([u for u in (DATABASE_URI, DATABASE_URI2, DATABASE_URI3, DATABASE_URI4, DATABASE_URI5) if u])
 
 """-----------------------------------------https://t.me/GetTGLink/4179 --------------------------------------"""
 
@@ -149,7 +155,7 @@ async def get_stats(bot, message):
         files = await Media.count_documents()
         size = await db.get_db_size()
         if DATABASE_URI:
-            free_value = max(0, 536870912 - size)
+            free_value = max(0, (MONGO_DB_CAP_BYTES * max(MONGO_DB_COUNT, 1)) - size)
             free = get_size(free_value)
         else:
             if POSTGRES_STORAGE_LIMIT_BYTES > 0:

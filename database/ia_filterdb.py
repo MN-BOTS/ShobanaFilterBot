@@ -4,14 +4,19 @@ import logging
 from struct import pack
 import re
 import base64
+import asyncio
+import time
 from pyrogram.file_id import FileId
-from pymongo.errors import DuplicateKeyError
-from umongo import Instance, Document, fields
+from pymongo.errors import DuplicateKeyError, OperationFailure
 from motor.motor_asyncio import AsyncIOMotorClient
-from marshmallow.exceptions import ValidationError
+import hashlib
 from sqlalchemy import text
 
-from info import DATABASE_URI, DATABASE_NAME, COLLECTION_NAME, USE_CAPTION_FILTER
+from info import (
+    DATABASE_URI, DATABASE_NAME, COLLECTION_NAME, USE_CAPTION_FILTER,
+    DATABASE_URI2, DATABASE_URI3, DATABASE_URI4, DATABASE_URI5,
+    DATABASE_NAME2, DATABASE_NAME3, DATABASE_NAME4, DATABASE_NAME5,
+)
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
@@ -24,6 +29,10 @@ if not USE_MONGO:
 
 class SQLMediaDoc(dict):
     def __getattr__(self, item):
+        if item == 'file_id':
+            return self.get('file_id') or self.get('_id')
+        if item == '_id':
+            return self.get('_id') or self.get('file_id')
         return self.get(item)
 
 
@@ -71,7 +80,18 @@ class SQLCursor:
                         item[k] = d[k]
                 projected.append(item)
             return projected
-        return [SQLMediaDoc(d) for d in docs]
+        return [_as_media_doc(d) for d in docs]
+
+
+def _as_media_doc(doc):
+    if doc is None:
+        return SQLMediaDoc()
+    d = SQLMediaDoc(doc)
+    if d.get('file_id') is None and d.get('_id') is not None:
+        d['file_id'] = d.get('_id')
+    if d.get('_id') is None and d.get('file_id') is not None:
+        d['_id'] = d.get('file_id')
+    return d
 
 
 def _match_filter(doc, query):
@@ -84,9 +104,9 @@ def _match_filter(doc, query):
             continue
         if key == '_id':
             if isinstance(val, dict) and '$in' in val:
-                if doc.get('file_id') not in val['$in']:
+                if (doc.get('file_id') or doc.get('_id')) not in val['$in']:
                     return False
-            elif doc.get('file_id') != val:
+            elif (doc.get('file_id') or doc.get('_id')) != val:
                 return False
             continue
 
@@ -150,23 +170,154 @@ class SQLMediaCollection:
 
 
 if USE_MONGO:
-    client = AsyncIOMotorClient(DATABASE_URI)
-    db = client[DATABASE_NAME]
-    instance = Instance.from_db(db)
+    _mongo_defs = [
+        (DATABASE_URI, DATABASE_NAME),
+        (DATABASE_URI2, DATABASE_NAME2),
+        (DATABASE_URI3, DATABASE_NAME3),
+        (DATABASE_URI4, DATABASE_NAME4),
+        (DATABASE_URI5, DATABASE_NAME5),
+    ]
+    _seen = set()
+    _mongo_collections = []
+    for uri, db_name in _mongo_defs:
+        if not uri:
+            continue
+        key = (uri.strip(), (db_name or DATABASE_NAME).strip())
+        if key in _seen:
+            continue
+        _seen.add(key)
+        client = AsyncIOMotorClient(key[0])
+        _mongo_collections.append(client[key[1]][COLLECTION_NAME])
 
-    @instance.register
-    class Media(Document):
-        file_id = fields.StrField(attribute='_id')
-        file_ref = fields.StrField(allow_none=True)
-        file_name = fields.StrField(required=True)
-        file_size = fields.IntField(required=True)
-        file_type = fields.StrField(allow_none=True)
-        mime_type = fields.StrField(allow_none=True)
-        caption = fields.StrField(allow_none=True)
+    if not _mongo_collections:
+        raise RuntimeError("At least one MongoDB URI is required when DATABASE_URI mode is enabled")
 
-        class Meta:
-            indexes = ('$file_name', )
-            collection_name = COLLECTION_NAME
+    MONGO_SHARD_COUNT = len(_mongo_collections)
+    logger.info("Media DB shards enabled: %d", MONGO_SHARD_COUNT)
+
+    class MongoUnionCursor:
+        def __init__(self, query=None, projection=None):
+            self.query = query or {}
+            self.projection = projection
+            self._sort = None
+            self._skip = 0
+            self._limit = None
+
+        def sort(self, field, direction):
+            self._sort = (field, direction)
+            return self
+
+        def skip(self, value):
+            self._skip = value
+            return self
+
+        def limit(self, value):
+            self._limit = value
+            return self
+
+        async def to_list(self, length=None):
+            requested = self._limit if self._limit is not None else length
+            per_shard_limit = self._skip + requested if requested is not None else None
+
+            if MONGO_SHARD_COUNT == 1:
+                cursor = _mongo_collections[0].find(self.query, self.projection)
+                if self._sort:
+                    field, direction = self._sort
+                    sort_field = 'created_at' if field == '$natural' else field
+                    cursor = cursor.sort(sort_field, direction)
+                if self._skip:
+                    cursor = cursor.skip(self._skip)
+                if requested is not None:
+                    cursor = cursor.limit(requested)
+                docs = await cursor.to_list(length=requested)
+                return [_as_media_doc(d) for d in docs]
+
+            async def _fetch(col):
+                cursor = col.find(self.query, self.projection)
+                if self._sort:
+                    field, direction = self._sort
+                    sort_field = 'created_at' if field == '$natural' else field
+                    cursor = cursor.sort(sort_field, direction)
+                if per_shard_limit is not None:
+                    cursor = cursor.limit(per_shard_limit)
+                docs = await cursor.to_list(length=per_shard_limit)
+                return [_as_media_doc(d) for d in docs]
+
+            parts = await asyncio.gather(*[_fetch(c) for c in _mongo_collections])
+            docs = [d for part in parts for d in part]
+
+            if self._sort:
+                field, direction = self._sort
+                reverse = direction == -1
+                key = 'created_at' if field in ('$natural', '_id') else field
+                docs.sort(key=lambda d: d.get(key, 0), reverse=reverse)
+
+            docs = docs[self._skip:]
+            cap = requested
+            if cap is not None:
+                docs = docs[:cap]
+            if length is not None:
+                docs = docs[:length]
+            return docs
+
+    class MongoMergedCollection:
+        async def find(self, query=None, projection=None):
+            return MongoUnionCursor(query=query, projection=projection)
+
+        async def delete_many(self, query):
+            results = await asyncio.gather(*[col.delete_many(query) for col in _mongo_collections])
+            return SQLDeleteResult(sum(r.deleted_count for r in results))
+
+        async def delete_one(self, query):
+            deleted = 0
+            for col in _mongo_collections:
+                if deleted:
+                    break
+                res = await col.delete_one(query)
+                deleted += res.deleted_count
+            return SQLDeleteResult(deleted)
+
+        async def drop(self):
+            await asyncio.gather(*[col.drop() for col in _mongo_collections])
+
+    class Media:
+        collection = MongoMergedCollection()
+
+        @staticmethod
+        async def ensure_indexes():
+            async def _create_idx(col, spec):
+                try:
+                    await col.create_index(spec)
+                except OperationFailure as exc:
+                    # Some providers can return stale/invalid options for existing
+                    # indexes (especially around implicit _id index metadata).
+                    # Do not crash bot startup for non-fatal index option issues.
+                    if getattr(exc, 'code', None) == 197 or 'InvalidIndexSpecificationOption' in str(exc):
+                        logger.warning("Skipping incompatible index option on %s: %s", col.name, exc)
+                        return
+                    raise
+
+            tasks = []
+            for col in _mongo_collections:
+                tasks.append(_create_idx(col, [('file_name', 1)]))
+                tasks.append(_create_idx(col, [('created_at', -1)]))
+            await asyncio.gather(*tasks)
+
+        @staticmethod
+        async def count_documents(query=None):
+            q = query or {}
+            if MONGO_SHARD_COUNT == 1:
+                return await _mongo_collections[0].count_documents(q)
+            counts = await asyncio.gather(*[col.count_documents(q) for col in _mongo_collections])
+            return sum(counts)
+
+        @staticmethod
+        def find(query=None):
+            return MongoUnionCursor(query=query)
+
+    def _target_collection(file_id: str):
+        idx = int(hashlib.md5(file_id.encode('utf-8')).hexdigest(), 16) % len(_mongo_collections)
+        return _mongo_collections[idx]
 
 else:
     def _load_docs_sync(query=None):
@@ -203,28 +354,26 @@ async def save_file(media):
     file_name = re.sub(r"(_|\-|\.|\+)", " ", str(media.file_name))
 
     if USE_MONGO:
+        doc = {
+            '_id': file_id,
+            'file_ref': file_ref,
+            'file_name': file_name,
+            'file_size': media.file_size,
+            'file_type': media.file_type,
+            'mime_type': media.mime_type,
+            'caption': media.caption.html if media.caption else None,
+            'created_at': time.time(),
+        }
         try:
-            file = Media(
-                file_id=file_id,
-                file_ref=file_ref,
-                file_name=file_name,
-                file_size=media.file_size,
-                file_type=media.file_type,
-                mime_type=media.mime_type,
-                caption=media.caption.html if media.caption else None,
-            )
-        except ValidationError:
+            await _target_collection(file_id).insert_one(doc)
+        except DuplicateKeyError:
+            logger.warning(f'{getattr(media, "file_name", "NO_FILE")} is already saved in database')
+            return False, 0
+        except Exception:
             logger.exception('Error occurred while saving file in database')
             return False, 2
-        else:
-            try:
-                await file.commit()
-            except DuplicateKeyError:
-                logger.warning(f'{getattr(media, "file_name", "NO_FILE")} is already saved in database')
-                return False, 0
-            else:
-                logger.info(f'{getattr(media, "file_name", "NO_FILE")} is saved to database')
-                return True, 1
+        logger.info(f'{getattr(media, "file_name", "NO_FILE")} is saved to database')
+        return True, 1
 
     with store.begin() as conn:
         exists = conn.execute(text("SELECT 1 FROM media WHERE file_id=:fid"), {"fid": file_id}).first()
@@ -272,25 +421,45 @@ async def get_search_results(query, file_type=None, max_results=10, offset=0, fi
     if file_type:
         filter['file_type'] = file_type
 
-    total_results = await Media.count_documents(filter)
-    next_offset = offset + max_results
+    if MONGO_SHARD_COUNT == 1:
+        col = _mongo_collections[0]
+        total_results = await col.count_documents(filter)
+        next_offset = offset + max_results
+        if next_offset >= total_results:
+            next_offset = ''
+        docs = await col.find(filter).sort('created_at', -1).skip(offset).limit(max_results).to_list(length=max_results)
+        return [_as_media_doc(d) for d in docs], next_offset, total_results
 
-    if next_offset > total_results:
+    count_tasks = [col.count_documents(filter) for col in _mongo_collections]
+    total_results = sum(await asyncio.gather(*count_tasks))
+    next_offset = offset + max_results
+    if next_offset >= total_results:
         next_offset = ''
 
-    cursor = Media.find(filter)
-    cursor.sort('$natural', -1)
-    cursor.skip(offset).limit(max_results)
-    files = await cursor.to_list(length=max_results)
+    fetch_limit = max(offset + max_results, max_results)
+
+    async def _fetch(col):
+        docs = await col.find(filter).sort('created_at', -1).limit(fetch_limit).to_list(length=fetch_limit)
+        return [_as_media_doc(d) for d in docs]
+
+    parts = await asyncio.gather(*[_fetch(c) for c in _mongo_collections])
+    files = [d for part in parts for d in part]
+    files.sort(key=lambda d: d.get('created_at', 0), reverse=True)
+    files = files[offset: offset + max_results]
 
     return files, next_offset, total_results
 
 
 async def get_file_details(query):
-    filter = {'file_id': query}
-    cursor = Media.find(filter)
-    filedetails = await cursor.to_list(length=1)
-    return filedetails
+    filter = {'_id': query}
+    if MONGO_SHARD_COUNT == 1:
+        filedetails = await _mongo_collections[0].find(filter).limit(1).to_list(length=1)
+        return [_as_media_doc(filedetails[0])] if filedetails else []
+    for col in _mongo_collections:
+        filedetails = await col.find(filter).limit(1).to_list(length=1)
+        if filedetails:
+            return [_as_media_doc(filedetails[0])]
+    return []
 
 
 def encode_file_id(s: bytes) -> str:
@@ -448,16 +617,22 @@ async def get_search_results(query, file_type=None, max_results=10, offset=0, fi
     if file_type:
         filter['file_type'] = file_type
 
-    total_results = await Media.count_documents(filter)
+    count_tasks = [col.count_documents(filter) for col in _mongo_collections]
+    total_results = sum(await asyncio.gather(*count_tasks))
     next_offset = offset + max_results
-
-    if next_offset > total_results:
+    if next_offset >= total_results:
         next_offset = ''
 
-    cursor = Media.find(filter)
-    cursor.sort('$natural', -1)
-    cursor.skip(offset).limit(max_results)
-    files = await cursor.to_list(length=max_results)
+    fetch_limit = max(offset + max_results, max_results)
+
+    async def _fetch(col):
+        docs = await col.find(filter).sort('created_at', -1).limit(fetch_limit).to_list(length=fetch_limit)
+        return [_as_media_doc(d) for d in docs]
+
+    parts = await asyncio.gather(*[_fetch(c) for c in _mongo_collections])
+    files = [d for part in parts for d in part]
+    files.sort(key=lambda d: d.get('created_at', 0), reverse=True)
+    files = files[offset: offset + max_results]
 
     return files, next_offset, total_results
 
@@ -474,10 +649,12 @@ async def get_file_details(query):
             ).first()
         return [_sql_row_to_doc(row)] if row else []
 
-    filter = {'file_id': query}
-    cursor = Media.find(filter)
-    filedetails = await cursor.to_list(length=1)
-    return filedetails
+    filter = {'_id': query}
+    for col in _mongo_collections:
+        filedetails = await col.find(filter).limit(1).to_list(length=1)
+        if filedetails:
+            return [_as_media_doc(filedetails[0])]
+    return []
 
 
 async def get_movie_list(limit=20):

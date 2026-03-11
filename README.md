@@ -72,8 +72,10 @@
 - `API_HASH`: Also from [Telegram Apps](https://my.telegram.org/apps).  
 - `CHANNELS`: Telegram channel/group usernames or IDs (space-separated).  
 - `ADMINS`: Admin usernames or IDs (space-separated).  
-- `DATABASE_URI`: MongoDB URI (first priority if set).  
-- `DATABASE_NAME`: MongoDB database name.  
+- `DATABASE_URI`: Primary MongoDB URI (first priority if set).  
+- `DATABASE_NAME`: Primary MongoDB database name.  
+- `DATABASE_URI2`..`DATABASE_URI5`: Optional extra MongoDB URIs (up to 5 total) for sharded media indexing/search.  
+- `DATABASE_NAME2`..`DATABASE_NAME5`: Optional database names for those extra MongoDB URIs (defaults to `DATABASE_NAME`).  
 - `POSTGRES_URI`: PostgreSQL connection URI used when `DATABASE_URI` is not set.  
 - `LOG_CHANNEL`: Telegram channel for activity logs.  
 
@@ -91,8 +93,8 @@
 
 ## 🚀 Deployment (Beginner Friendly Full Guide)
 
-This guide now supports only **two databases**:
-1. **MongoDB** (`DATABASE_URI`)
+This guide supports MongoDB or PostgreSQL:
+1. **MongoDB** (`DATABASE_URI`) with optional media shards (`DATABASE_URI2`..`DATABASE_URI5`)
 2. **PostgreSQL** (`POSTGRES_URI`) when MongoDB is not set.
 
 ---
