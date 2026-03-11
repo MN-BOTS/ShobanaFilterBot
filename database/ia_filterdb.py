@@ -29,6 +29,10 @@ if not USE_MONGO:
 
 class SQLMediaDoc(dict):
     def __getattr__(self, item):
+        if item == 'file_id':
+            return self.get('file_id') or self.get('_id')
+        if item == '_id':
+            return self.get('_id') or self.get('file_id')
         return self.get(item)
 
 
@@ -76,7 +80,18 @@ class SQLCursor:
                         item[k] = d[k]
                 projected.append(item)
             return projected
-        return [SQLMediaDoc(d) for d in docs]
+        return [_as_media_doc(d) for d in docs]
+
+
+def _as_media_doc(doc):
+    if doc is None:
+        return SQLMediaDoc()
+    d = SQLMediaDoc(doc)
+    if d.get('file_id') is None and d.get('_id') is not None:
+        d['file_id'] = d.get('_id')
+    if d.get('_id') is None and d.get('file_id') is not None:
+        d['_id'] = d.get('file_id')
+    return d
 
 
 def _match_filter(doc, query):
@@ -215,7 +230,7 @@ if USE_MONGO:
                 if requested is not None:
                     cursor = cursor.limit(requested)
                 docs = await cursor.to_list(length=requested)
-                return [SQLMediaDoc(d) for d in docs]
+                return [_as_media_doc(d) for d in docs]
 
             async def _fetch(col):
                 cursor = col.find(self.query, self.projection)
@@ -226,7 +241,7 @@ if USE_MONGO:
                 if per_shard_limit is not None:
                     cursor = cursor.limit(per_shard_limit)
                 docs = await cursor.to_list(length=per_shard_limit)
-                return [SQLMediaDoc(d) for d in docs]
+                return [_as_media_doc(d) for d in docs]
 
             parts = await asyncio.gather(*[_fetch(c) for c in _mongo_collections])
             docs = [d for part in parts for d in part]
@@ -413,7 +428,7 @@ async def get_search_results(query, file_type=None, max_results=10, offset=0, fi
         if next_offset >= total_results:
             next_offset = ''
         docs = await col.find(filter).sort('created_at', -1).skip(offset).limit(max_results).to_list(length=max_results)
-        return [SQLMediaDoc(d) for d in docs], next_offset, total_results
+        return [_as_media_doc(d) for d in docs], next_offset, total_results
 
     count_tasks = [col.count_documents(filter) for col in _mongo_collections]
     total_results = sum(await asyncio.gather(*count_tasks))
@@ -425,7 +440,7 @@ async def get_search_results(query, file_type=None, max_results=10, offset=0, fi
 
     async def _fetch(col):
         docs = await col.find(filter).sort('created_at', -1).limit(fetch_limit).to_list(length=fetch_limit)
-        return [SQLMediaDoc(d) for d in docs]
+        return [_as_media_doc(d) for d in docs]
 
     parts = await asyncio.gather(*[_fetch(c) for c in _mongo_collections])
     files = [d for part in parts for d in part]
@@ -439,11 +454,11 @@ async def get_file_details(query):
     filter = {'_id': query}
     if MONGO_SHARD_COUNT == 1:
         filedetails = await _mongo_collections[0].find(filter).limit(1).to_list(length=1)
-        return [SQLMediaDoc(filedetails[0])] if filedetails else []
+        return [_as_media_doc(filedetails[0])] if filedetails else []
     for col in _mongo_collections:
         filedetails = await col.find(filter).limit(1).to_list(length=1)
         if filedetails:
-            return [SQLMediaDoc(filedetails[0])]
+            return [_as_media_doc(filedetails[0])]
     return []
 
 
@@ -612,7 +627,7 @@ async def get_search_results(query, file_type=None, max_results=10, offset=0, fi
 
     async def _fetch(col):
         docs = await col.find(filter).sort('created_at', -1).limit(fetch_limit).to_list(length=fetch_limit)
-        return [SQLMediaDoc(d) for d in docs]
+        return [_as_media_doc(d) for d in docs]
 
     parts = await asyncio.gather(*[_fetch(c) for c in _mongo_collections])
     files = [d for part in parts for d in part]
@@ -638,7 +653,7 @@ async def get_file_details(query):
     for col in _mongo_collections:
         filedetails = await col.find(filter).limit(1).to_list(length=1)
         if filedetails:
-            return [SQLMediaDoc(filedetails[0])]
+            return [_as_media_doc(filedetails[0])]
     return []
 
 
