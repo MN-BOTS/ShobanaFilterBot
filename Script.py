@@ -3,9 +3,79 @@ class script(object):
 𝖨𝗆 𝖺𝗇 𝖺𝗎𝗍𝗈 𝖿𝗂𝗅𝗍𝖾𝗋 𝖻𝗈𝗍 𝗐𝗁𝗂𝖼𝗁 𝖼𝖺𝗇 𝗉𝗋𝗈𝗏𝗂𝖽𝖾 𝗆𝗈𝗏𝗂𝖾𝗌 𝗂𝗇 𝗒𝗈𝗎𝗋 𝗀𝗋𝗈𝗎𝗉𝗌.
 + 𝖠𝖽𝖽 𝖬𝖾 𝖳𝗈 𝖸𝗈𝗎𝗋 𝖦𝗋𝗈𝗎𝗉 + 𝖺𝗇𝖽 𝗉𝗋𝗈𝗆𝗈𝗍𝖾 𝗆𝖾 𝖺𝗌 𝖺𝖽𝗆𝗂𝗇 𝗍𝗈 𝗅𝖾𝗍 𝗆𝖾 𝗀𝖾𝗍 𝗂𝗇 𝖺𝖼𝗍𝗂𝗈𝗇."""
     HELP_TXT = """
-     Hey  {} 
-Currently using free server so please Dont kill Me...
+<b>Hey {} 👋</b>
+
+Use the buttons below to browse all features and commands.
+Each help page contains a short list for easy reading.
 """
+    HELP_PAGES = [
+"""<b>📘 Help (1/6): Core Features</b>
+• Auto filter and manual filter replies
+• IMDB details with poster + metadata
+• Spell-check suggestions for wrong queries
+• File indexing from linked channels
+• Multi-database support (Mongo + SQL)
+• Hyperlink result mode support
+• Connection manager for PM controls
+• File auto-delete and protected delivery
+• Multiple force-sub channels support
+• Inline search and share support""",
+"""<b>📘 Help (2/6): Public Commands</b>
+• /start - Start the bot
+• /movies - Latest added movies
+• /series - Latest added series
+• /connect - Connect group to PM
+• /disconnect - Disconnect active chat
+• /connections - Show your connections
+• /settings - Open group settings
+• /filter or /add - Create manual filter
+• /filters or /viewfilters - List filters
+• /del and /delall - Delete filters""",
+"""<b>📘 Help (3/6): Utility Commands</b>
+• /imdb and /mnsearch - Search movie info
+• /id - Show user/chat id
+• /info - Show user information
+• /bug /bugs /feedback - Send feedback
+• /search - Search from external sources
+• /paste /pasty /tgpaste - Create paste link
+• /short - Shorten URL
+• /tr - Translate replied text
+• /font - Style your text
+• /genpassword or /genpw - Generate password""",
+"""<b>📘 Help (4/6): Media/Extra Commands</b>
+• /tts - Text to speech
+• /carbon - Generate carbon image
+• /stickerid - Get sticker file id
+• /json /js /showjson - Message JSON
+• /img /cup /telegraph - Image to link
+• /share /share_text /sharetext - Share text
+• /echo - Repeat text
+• /pin - Pin replied message
+• /unpin - Unpin a message
+• /unpin_all - Unpin all messages""",
+"""<b>📘 Help (5/6): Group/Admin Commands</b>
+• /promote - Promote user in group
+• /demote - Demote user in group
+• /stats - Show database bot stats
+• /invite - Generate group invite link
+• /ban - Ban a user from bot
+• /unban - Unban a user
+• /leave - Leave a chat
+• /disable - Disable a chat
+• /enable - Enable a chat
+• /deletefiles & /deleteall - Bulk file delete""",
+"""<b>📘 Help (6/6): Owner/Admin-Only</b>
+• /users - List bot users
+• /chats - List connected chats
+• /channel - List indexed channels
+• /broadcast - Broadcast to users
+• /grpbroadcast - Broadcast to groups
+• /logs - Get recent logs
+• /delete - Delete one indexed file
+• /fsub - Update force-sub channels
+• /restart, /ping, /usage - System tools
+• /set_template, /setskip, /clear_join_users"""
+    ]
     ABOUT_TXT = """<b>
 ◎ Cʀᴇᴀᴛᴏʀ: <a href=https://github.com/mntg4u> MN - TG</a>
 ◎ Lᴀɴɢᴜᴀɢᴇ: Pʏᴛʜᴏɴ 3
@@ -188,4 +258,3 @@ OR
 """
     RESTART_TXT = """
 <b><u>𝖡𝗈𝗍 𝖱𝖾𝗌𝗍𝖺𝗋𝗍𝖾𝖽 ✅</u></b>"""
-

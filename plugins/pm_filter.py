@@ -465,6 +465,10 @@ async def cb_handler(client: Client, query: CallbackQuery):
         await query.answer('Piracy Is Crime')
     elif query.data == "help":
         buttons = [[
+            InlineKeyboardButton('◀️ Pʀᴇᴠ', callback_data='help_page_5'),
+            InlineKeyboardButton('1/6', callback_data='pages'),
+            InlineKeyboardButton('Nᴇxᴛ ▶️', callback_data='help_page_1')
+        ], [
             InlineKeyboardButton('Mᴀɴᴜᴀʟ Fɪʟᴛᴇʀ', callback_data='manuelfilter'),
             InlineKeyboardButton('Aᴜᴛᴏ Fɪʟᴛᴇʀ', callback_data='autofilter')
         ], [
@@ -472,13 +476,44 @@ async def cb_handler(client: Client, query: CallbackQuery):
             InlineKeyboardButton('Exᴛʀᴀ Tʜɪɴɢs', callback_data='extra')
         ], [
             InlineKeyboardButton('Hᴏᴍᴇ', callback_data='start'),
-            InlineKeyboardButton('Bᴀᴄᴋ', callback_data='start')
-        ],[
             InlineKeyboardButton('ʀᴇᴘᴏ', url='https://github.com/mn-bots/ShobanaFilterBot')
-            ]]
+        ]]
         reply_markup = InlineKeyboardMarkup(buttons)
         await query.message.edit_text(
-            text=script.HELP_TXT.format(query.from_user.mention),
+            text=f"{script.HELP_TXT.format(query.from_user.mention)}\n\n{script.HELP_PAGES[0]}",
+            reply_markup=reply_markup,
+            parse_mode=enums.ParseMode.HTML
+        )
+    elif query.data.startswith("help_page_"):
+        try:
+            page = int(query.data.rsplit("_", 1)[1])
+        except ValueError:
+            return await query.answer("Invalid help page", show_alert=True)
+
+        total_pages = len(script.HELP_PAGES)
+        if page < 0 or page >= total_pages:
+            return await query.answer("Invalid help page", show_alert=True)
+
+        prev_page = (page - 1) % total_pages
+        next_page = (page + 1) % total_pages
+
+        buttons = [[
+            InlineKeyboardButton('◀️ Pʀᴇᴠ', callback_data=f'help_page_{prev_page}'),
+            InlineKeyboardButton(f'{page + 1}/{total_pages}', callback_data='pages'),
+            InlineKeyboardButton('Nᴇxᴛ ▶️', callback_data=f'help_page_{next_page}')
+        ], [
+            InlineKeyboardButton('Mᴀɴᴜᴀʟ Fɪʟᴛᴇʀ', callback_data='manuelfilter'),
+            InlineKeyboardButton('Aᴜᴛᴏ Fɪʟᴛᴇʀ', callback_data='autofilter')
+        ], [
+            InlineKeyboardButton('Cᴏɴɴᴇᴄᴛɪᴏɴ', callback_data='coct'),
+            InlineKeyboardButton('Exᴛʀᴀ Tʜɪɴɢs', callback_data='extra')
+        ], [
+            InlineKeyboardButton('Hᴏᴍᴇ', callback_data='start'),
+            InlineKeyboardButton('ʀᴇᴘᴏ', url='https://github.com/mn-bots/ShobanaFilterBot')
+        ]]
+        reply_markup = InlineKeyboardMarkup(buttons)
+        await query.message.edit_text(
+            text=f"{script.HELP_TXT.format(query.from_user.mention)}\n\n{script.HELP_PAGES[page]}",
             reply_markup=reply_markup,
             parse_mode=enums.ParseMode.HTML
         )
