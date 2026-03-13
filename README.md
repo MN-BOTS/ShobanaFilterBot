@@ -66,6 +66,87 @@
 - ✅ SQL database (postgrasql) support (Optional).
 - ✅ 5 MongoDb support (optional).
 
+
+## 🤖 Commands & Bot Features
+
+### Full command list
+
+**Core / Search**
+- `/start`
+- `/movies`
+- `/series`
+- `/imdb`, `/mnsearch`
+- `/search`
+
+**Filter / Connection**
+- `/filter`, `/add`
+- `/filters`, `/viewfilters`
+- `/del`
+- `/delall`
+- `/connect`
+- `/disconnect`
+- `/connections`
+- `/settings`
+
+**Utilities / Extras**
+- `/id`
+- `/info`
+- `/bug`, `/bugs`, `/feedback`
+- `/paste`, `/pasty`, `/tgpaste`
+- `/short`
+- `/tr`
+- `/font`
+- `/genpassword`, `/genpw`
+- `/tts`
+- `/carbon`
+- `/stickerid`
+- `/json`, `/js`, `/showjson`
+- `/img`, `/cup`, `/telegraph`
+- `/share`, `/share_text`, `/sharetext`
+- `/echo`
+- `/pin`
+- `/unpin`
+- `/unpin_all`
+- `/promote`
+- `/demote`
+
+**Admin / Owner**
+- `/stats`
+- `/invite`
+- `/ban`
+- `/unban`
+- `/users`
+- `/chats`
+- `/channel`
+- `/broadcast`
+- `/grpbroadcast`
+- `/logs`
+- `/delete`
+- `/deleteall`
+- `/deletefiles`
+- `/fsub`
+- `/set_template`
+- `/setskip`
+- `/clear_join_users`
+- `/leave`
+- `/disable`
+- `/enable`
+- `/ping`
+- `/usage`
+- `/restart`
+
+### Feature highlights shown in Help
+- Auto + manual filter responses
+- Channel file indexing and searchable DB
+- Inline result support and hyperlink result mode
+- IMDB cards with metadata and posters
+- Spell check suggestions for missing titles
+- Multiple force-sub channels and gated access
+- PM connection manager for group controls
+- File auto-delete and protected media delivery
+- Multi DB backend support (MongoDB / PostgreSQL)
+- Broadcast tools and moderation controls
+
 ## 🔧 Variables
 
 ### Required
