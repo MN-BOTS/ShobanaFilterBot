@@ -13,6 +13,28 @@ def is_enabled(value, default):
     else:
         return default
 
+
+
+def parse_size_to_bytes(value: str, default: int = 0) -> int:
+    if value is None:
+        return default
+    raw = str(value).strip().lower()
+    if not raw:
+        return default
+    m = re.fullmatch(r"(\d+(?:\.\d+)?)\s*([kmgtp]?b?)?", raw)
+    if not m:
+        return default
+    number = float(m.group(1))
+    unit = (m.group(2) or "b").rstrip("b")
+    scale = {
+        "": 1,
+        "k": 1024,
+        "m": 1024**2,
+        "g": 1024**3,
+        "t": 1024**4,
+        "p": 1024**5,
+    }
+    return int(number * scale.get(unit, 1))
 #Bot information
 SESSION = environ.get('SESSION', 'Media_search')
 API_ID = int(environ.get('API_ID', ''))
@@ -44,11 +66,21 @@ AUTH_GROUPS = [int(ch) for ch in auth_grp.split()] if auth_grp else None
 DATABASE_URI = environ.get('DATABASE_URI', "")
 DATABASE_NAME = environ.get('DATABASE_NAME', "Cluster0")
 COLLECTION_NAME = environ.get('COLLECTION_NAME', 'mn_files')
+DATABASE_URI2 = environ.get('DATABASE_URI2', "")
+DATABASE_URI3 = environ.get('DATABASE_URI3', "")
+DATABASE_URI4 = environ.get('DATABASE_URI4', "")
+DATABASE_URI5 = environ.get('DATABASE_URI5', "")
+DATABASE_NAME2 = environ.get('DATABASE_NAME2', DATABASE_NAME)
+DATABASE_NAME3 = environ.get('DATABASE_NAME3', DATABASE_NAME)
+DATABASE_NAME4 = environ.get('DATABASE_NAME4', DATABASE_NAME)
+DATABASE_NAME5 = environ.get('DATABASE_NAME5', DATABASE_NAME)
+POSTGRES_URI = environ.get('POSTGRES_URI', '')
+POSTGRES_STORAGE_LIMIT_BYTES = parse_size_to_bytes(environ.get('POSTGRES_STORAGE_LIMIT_BYTES', '1GB'), 0)
 
 # File Channel Settings
-FILE_CHANNELS = [int(ch) for ch in environ.get('FILE_CHANNELS', '-1002831639976 -1002607076908 -1002869981026').split()]
-FILE_CHANNEL_SENDING_MODE = is_enabled(environ.get('FILE_CHANNEL_SENDING_MODE', 'False'), False)
-FILE_AUTO_DELETE_SECONDS = int(environ.get('FILE_AUTO_DELETE_SECONDS', 3600))  # Default: 1 hour
+FILE_CHANNELS = [int(ch) for ch in environ.get('FILE_CHANNELS', '-1003530898889').split()]
+FILE_CHANNEL_SENDING_MODE = is_enabled(environ.get('FILE_CHANNEL_SENDING_MODE', 'True'), False)
+FILE_AUTO_DELETE_SECONDS = int(environ.get('FILE_AUTO_DELETE_SECONDS', 15))  # Default: 1 hour
 
 # Others
 LOG_CHANNEL = int(environ.get('LOG_CHANNEL', '-1002704640995'))

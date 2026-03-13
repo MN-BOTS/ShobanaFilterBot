@@ -9,8 +9,11 @@ from Script import script
 import pyrogram
 from database.connections_mdb import active_connection, all_connections, delete_connection, if_active, make_active, \
     make_inactive
-from info import ADMINS, AUTH_USERS, CUSTOM_FILE_CAPTION, AUTH_GROUPS, P_TTI_SHOW_OFF, IMDB, \
-    SINGLE_BUTTON, SPELL_CHECK_REPLY, IMDB_TEMPLATE
+from info import (
+    ADMINS, AUTH_USERS, CUSTOM_FILE_CAPTION, AUTH_GROUPS, P_TTI_SHOW_OFF, IMDB,
+    SINGLE_BUTTON, SPELL_CHECK_REPLY, IMDB_TEMPLATE, DATABASE_URI, DATABASE_URI2, DATABASE_URI3, DATABASE_URI4, DATABASE_URI5,
+    POSTGRES_STORAGE_LIMIT_BYTES,
+)
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from pyrogram import Client, filters, enums
 from pyrogram.errors import FloodWait, UserIsBlocked, MessageNotModified, PeerIdInvalid
@@ -29,6 +32,8 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.ERROR)
 
 BUTTONS = {}
+MONGO_DB_CAP_BYTES = 536870912
+MONGO_DB_COUNT = len([u for u in (DATABASE_URI, DATABASE_URI2, DATABASE_URI3, DATABASE_URI4, DATABASE_URI5) if u])
 SPELL_CHECK = {}
 
 
@@ -578,16 +583,23 @@ async def cb_handler(client: Client, query: CallbackQuery):
         users = await db.total_users_count()
         chats = await db.total_chat_count()
         monsize = await db.get_db_size()
-        free = 536870912 - monsize
+        if DATABASE_URI:
+            free_value = max(0, (MONGO_DB_CAP_BYTES * max(MONGO_DB_COUNT, 1)) - monsize)
+            free = get_size(free_value)
+        else:
+            if POSTGRES_STORAGE_LIMIT_BYTES > 0:
+                free_value = max(0, POSTGRES_STORAGE_LIMIT_BYTES - monsize)
+                free = get_size(free_value)
+            else:
+                free = "Plan based (set POSTGRES_STORAGE_LIMIT_BYTES)"
         monsize = get_size(monsize)
-        free = get_size(free)
         await query.message.edit_text(
             text=script.STATUS_TXT.format(total, users, chats, monsize, free),
             reply_markup=reply_markup,
             parse_mode=enums.ParseMode.HTML
         )
     elif query.data == "rfrsh":
-        await query.answer("Fetching MongoDb DataBase")
+        await query.answer("Refreshing database stats")
         buttons = [[
             InlineKeyboardButton('ʙᴀᴄᴋ', callback_data='help'),
             InlineKeyboardButton('♻️', callback_data='rfrsh'),
@@ -598,9 +610,16 @@ async def cb_handler(client: Client, query: CallbackQuery):
         users = await db.total_users_count()
         chats = await db.total_chat_count()
         monsize = await db.get_db_size()
-        free = 536870912 - monsize
+        if DATABASE_URI:
+            free_value = max(0, (MONGO_DB_CAP_BYTES * max(MONGO_DB_COUNT, 1)) - monsize)
+            free = get_size(free_value)
+        else:
+            if POSTGRES_STORAGE_LIMIT_BYTES > 0:
+                free_value = max(0, POSTGRES_STORAGE_LIMIT_BYTES - monsize)
+                free = get_size(free_value)
+            else:
+                free = "Plan based (set POSTGRES_STORAGE_LIMIT_BYTES)"
         monsize = get_size(monsize)
-        free = get_size(free)
         await query.message.edit_text(
             text=script.STATUS_TXT.format(total, users, chats, monsize, free),
             reply_markup=reply_markup,
