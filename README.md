@@ -69,7 +69,7 @@
 
 
 ## Commands
-'''
+```
 start - Start the bot
 movies - Latest added movies
 series - Latest added series
@@ -140,8 +140,7 @@ usage - Show resource usage
 set_template - Set custom template
 setskip - Set skip settings
 clear_join_users - Clear join users data
-'''
-
+```
 
 ## 🔧 Variables
 
