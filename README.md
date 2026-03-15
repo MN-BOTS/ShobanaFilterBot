@@ -67,85 +67,81 @@
 - ✅ 5 MongoDb support (optional).
 
 
-## 🤖 Commands & Bot Features
 
-### Full command list
+## Commands
+'''
+start - Start the bot
+movies - Latest added movies
+series - Latest added series
+connect - Connect group to PM
+disconnect - Disconnect active chat
+connections - Show your connections
+settings - Open group settings
+filter - Create manual filter
+add - Create manual filter (alias)
+filters - List filters
+viewfilters - List filters (alias)
+del - Delete filter
+delall - Delete all filters
+imdb - Search movie/series info
+mnsearch - Search movie/series info (alias)
+id - Show user / chat ID
+info - Show user information
+bug - Send bug report / feedback
+bugs - Send bug report / feedback (alias)
+feedback - Send feedback (alias)
+search - Search from external sources
+paste - Create paste link
+pasty - Create paste link (alias)
+tgpaste - Create paste link (alias)
+short - Shorten URL
+tr - Translate replied text
+font - Style your text
+genpassword - Generate strong password
+genpw - Generate strong password (alias)
+tts - Text to speech
+carbon - Generate carbon image
+stickerid - Get sticker file ID
+json - Show message JSON
+js - Show message JSON (alias)
+showjson - Show message JSON (alias)
+img - Upload image and get link
+cup - Upload image and get link (alias)
+telegraph - Upload image and get link (alias)
+share - Share text as link
+share_text - Share text as link (alias)
+sharetext - Share text as link (alias)
+echo - Repeat the text
+pin - Pin replied message
+unpin - Unpin a message
+unpin_all - Unpin all messages
+promote - Promote a user in group
+demote - Demote a user in group
+stats - Show bot database statistics
+invite - Generate group invite link
+ban - Ban user from using the bot
+unban - Unban user
+leave - Make bot leave a chat
+disable - Disable a chat
+enable - Enable a disabled chat
+deletefiles - Bulk delete indexed files
+deleteall - Delete all indexed files
+users - List bot users
+chats - List connected chats/groups
+channel - List indexed channels
+broadcast - Broadcast message to users
+grpbroadcast - Broadcast message to groups
+logs - Get recent bot logs
+delete - Delete one indexed file
+fsub - Update force-subscribe channels
+restart - Restart the bot
+ping - Check bot ping
+usage - Show resource usage
+set_template - Set custom template
+setskip - Set skip settings
+clear_join_users - Clear join users data
+'''
 
-**Core / Search**
-- `/start`
-- `/movies`
-- `/series`
-- `/imdb`, `/mnsearch`
-- `/search`
-
-**Filter / Connection**
-- `/filter`, `/add`
-- `/filters`, `/viewfilters`
-- `/del`
-- `/delall`
-- `/connect`
-- `/disconnect`
-- `/connections`
-- `/settings`
-
-**Utilities / Extras**
-- `/id`
-- `/info`
-- `/bug`, `/bugs`, `/feedback`
-- `/paste`, `/pasty`, `/tgpaste`
-- `/short`
-- `/tr`
-- `/font`
-- `/genpassword`, `/genpw`
-- `/tts`
-- `/carbon`
-- `/stickerid`
-- `/json`, `/js`, `/showjson`
-- `/img`, `/cup`, `/telegraph`
-- `/share`, `/share_text`, `/sharetext`
-- `/echo`
-- `/pin`
-- `/unpin`
-- `/unpin_all`
-- `/promote`
-- `/demote`
-
-**Admin / Owner**
-- `/stats`
-- `/invite`
-- `/ban`
-- `/unban`
-- `/users`
-- `/chats`
-- `/channel`
-- `/broadcast`
-- `/grpbroadcast`
-- `/logs`
-- `/delete`
-- `/deleteall`
-- `/deletefiles`
-- `/fsub`
-- `/set_template`
-- `/setskip`
-- `/clear_join_users`
-- `/leave`
-- `/disable`
-- `/enable`
-- `/ping`
-- `/usage`
-- `/restart`
-
-### Feature highlights shown in Help
-- Auto + manual filter responses
-- Channel file indexing and searchable DB
-- Inline result support and hyperlink result mode
-- IMDB cards with metadata and posters
-- Spell check suggestions for missing titles
-- Multiple force-sub channels and gated access
-- PM connection manager for group controls
-- File auto-delete and protected media delivery
-- Multi DB backend support (MongoDB / PostgreSQL)
-- Broadcast tools and moderation controls
 
 ## 🔧 Variables
 
