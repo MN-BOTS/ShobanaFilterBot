@@ -2,7 +2,7 @@
 # please give credits https://github.com/MN-BOTS/ShobanaFilterBot
 
 from pyrogram import Client, filters
-from pyrogram.errors import FloodWait, UserIsBlocked, InputUserDeactivated
+from pyrogram.errors import FloodWait
 import datetime
 import time
 import asyncio
@@ -43,7 +43,7 @@ class BroadcastStats:
 # ── Per-user send with internal FloodWait retry ──────────────────────────────
 async def _send_one(sem: asyncio.Semaphore, user_id: int, b_msg, stats: BroadcastStats):
     async with sem:
-        await asyncio.sleep(INTER_SEND_DELAY)   # gentle inter-slot pacing
+        await asyncio.sleep(INTER_SEND_DELAY)
         retries = 0
         while retries < 3:
             try:
@@ -60,13 +60,11 @@ async def _send_one(sem: asyncio.Semaphore, user_id: int, b_msg, stats: Broadcas
                     await stats.record("failed")
                 return
             except FloodWait as e:
-                wait = e.value + 5          # always add a small buffer
-                await asyncio.sleep(wait)
+                await asyncio.sleep(e.value + 5)
                 retries += 1
             except Exception:
                 await stats.record("failed")
                 return
-        # exhausted retries
         await stats.record("failed")
 
 
@@ -84,35 +82,41 @@ async def broadcast(bot, message):
         elapsed = datetime.timedelta(seconds=int(time.time() - start_time))
         return (
             f"📡 **Broadcast in progress…**\n\n"
-            f"👥 Total : `{total_users}`\n"
-            f"✅ Done  : `{stats.done}` / `{total_users}`\n"
-            f"✔️ Success: `{stats.success}`\n"
-            f"🚫 Blocked: `{stats.blocked}`\n"
-            f"🗑 Deleted: `{stats.deleted}`\n"
-            f"❌ Failed : `{stats.failed}`\n"
-            f"⏱ Elapsed: `{elapsed}`"
+            f"👥 Total  : `{total_users}`\n"
+            f"✅ Done   : `{stats.done}` / `{total_users}`\n"
+            f"✔️ Success : `{stats.success}`\n"
+            f"🚫 Blocked : `{stats.blocked}`\n"
+            f"🗑 Deleted : `{stats.deleted}`\n"
+            f"❌ Failed  : `{stats.failed}`\n"
+            f"⏱ Elapsed : `{elapsed}`"
         )
 
-    # Build all tasks upfront — semaphore controls actual concurrency
+    # ── Build task list (fix: await first, then iterate) ────────────────────
     all_tasks = []
-    async for user in db.get_all_users():
-        uid = int(user['id'])
-        all_tasks.append(_send_one(sem, uid, b_msg, stats))
+    try:
+        # Case 1: get_all_users() returns an async generator after await
+        async for user in await db.get_all_users():
+            uid = int(user['id'])
+            all_tasks.append(_send_one(sem, uid, b_msg, stats))
+    except TypeError:
+        # Case 2: get_all_users() returns a plain list after await
+        users = await db.get_all_users()
+        for user in users:
+            uid = int(user['id'])
+            all_tasks.append(_send_one(sem, uid, b_msg, stats))
 
-    # Run in chunks so we can update the status message periodically
-    # without waiting for ALL tasks to finish first
+    # ── Run all tasks, updating status periodically ──────────────────────────
     async def _run_with_updates():
         pending = [asyncio.ensure_future(t) for t in all_tasks]
         last_update = 0
         while pending:
-            done_fs, pending_set = await asyncio.wait(
+            await asyncio.wait(
                 pending,
                 return_when=asyncio.FIRST_COMPLETED,
                 timeout=2.0
             )
-            pending = list(pending_set)
+            pending = [f for f in pending if not f.done()]
 
-            # Update status every BATCH_UPDATE_AT completions
             if stats.done - last_update >= BATCH_UPDATE_AT:
                 last_update = stats.done
                 try:
@@ -120,23 +124,23 @@ async def broadcast(bot, message):
                 except FloodWait as e:
                     await asyncio.sleep(e.value)
                 except Exception:
-                    pass    # status edit failure must never kill the broadcast
+                    pass  # status edit failure must never kill the broadcast
 
     await _run_with_updates()
 
     time_taken = datetime.timedelta(seconds=int(time.time() - start_time))
     await sts.edit(
         f"✅ **Broadcast Completed!**\n\n"
-        f"⏱ Time taken : `{time_taken}`\n"
-        f"👥 Total users: `{total_users}`\n"
-        f"✔️ Success : `{stats.success}`\n"
-        f"🚫 Blocked : `{stats.blocked}`\n"
-        f"🗑 Deleted : `{stats.deleted}`\n"
-        f"❌ Failed  : `{stats.failed}`"
+        f"⏱ Time taken  : `{time_taken}`\n"
+        f"👥 Total users : `{total_users}`\n"
+        f"✔️ Success  : `{stats.success}`\n"
+        f"🚫 Blocked  : `{stats.blocked}`\n"
+        f"🗑 Deleted  : `{stats.deleted}`\n"
+        f"❌ Failed   : `{stats.failed}`"
     )
 
 
-# ── /grpbroadcast ─────────────────────────────────────────────────────────────
+# ── Per-group send with internal FloodWait retry ─────────────────────────────
 async def _send_group_one(sem: asyncio.Semaphore, chat_id: int, b_msg, stats: BroadcastStats):
     async with sem:
         await asyncio.sleep(INTER_SEND_DELAY)
@@ -155,6 +159,7 @@ async def _send_group_one(sem: asyncio.Semaphore, chat_id: int, b_msg, stats: Br
         await stats.record("failed")
 
 
+# ── /grpbroadcast ─────────────────────────────────────────────────────────────
 @Client.on_message(filters.command("grpbroadcast") & filters.user(ADMINS) & filters.reply)
 async def grpbroadcast(bot, message):
     b_msg       = message.reply_to_message
@@ -168,23 +173,37 @@ async def grpbroadcast(bot, message):
         elapsed = datetime.timedelta(seconds=int(time.time() - start_time))
         return (
             f"📡 **Group Broadcast in progress…**\n\n"
-            f"💬 Total : `{total_chats}`\n"
-            f"✅ Done  : `{stats.done}` / `{total_chats}`\n"
-            f"✔️ Success: `{stats.success}`\n"
-            f"❌ Failed : `{stats.failed}`\n"
-            f"⏱ Elapsed: `{elapsed}`"
+            f"💬 Total  : `{total_chats}`\n"
+            f"✅ Done   : `{stats.done}` / `{total_chats}`\n"
+            f"✔️ Success : `{stats.success}`\n"
+            f"❌ Failed  : `{stats.failed}`\n"
+            f"⏱ Elapsed : `{elapsed}`"
         )
 
+    # ── Build task list (fix: await first, then iterate) ────────────────────
     all_tasks = []
-    async for chat in db.get_all_chats():
-        cid = int(chat['id'])
-        all_tasks.append(_send_group_one(sem, cid, b_msg, stats))
+    try:
+        # Case 1: get_all_chats() returns an async generator after await
+        async for chat in await db.get_all_chats():
+            cid = int(chat['id'])
+            all_tasks.append(_send_group_one(sem, cid, b_msg, stats))
+    except TypeError:
+        # Case 2: get_all_chats() returns a plain list after await
+        chats = await db.get_all_chats()
+        for chat in chats:
+            cid = int(chat['id'])
+            all_tasks.append(_send_group_one(sem, cid, b_msg, stats))
 
+    # ── Run all tasks, updating status periodically ──────────────────────────
     async def _run_with_updates():
         pending = [asyncio.ensure_future(t) for t in all_tasks]
         last_update = 0
         while pending:
-            await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED, timeout=2.0)
+            await asyncio.wait(
+                pending,
+                return_when=asyncio.FIRST_COMPLETED,
+                timeout=2.0
+            )
             pending = [f for f in pending if not f.done()]
 
             if stats.done - last_update >= BATCH_UPDATE_AT:
@@ -201,10 +220,10 @@ async def grpbroadcast(bot, message):
     time_taken = datetime.timedelta(seconds=int(time.time() - start_time))
     await sts.edit(
         f"✅ **Group Broadcast Completed!**\n\n"
-        f"⏱ Time taken : `{time_taken}`\n"
-        f"💬 Total groups: `{total_chats}`\n"
-        f"✔️ Success : `{stats.success}`\n"
-        f"❌ Failed  : `{stats.failed}`"
+        f"⏱ Time taken   : `{time_taken}`\n"
+        f"💬 Total groups : `{total_chats}`\n"
+        f"✔️ Success  : `{stats.success}`\n"
+        f"❌ Failed   : `{stats.failed}`"
     )
 
 #  @MrMNTG @MusammilN
