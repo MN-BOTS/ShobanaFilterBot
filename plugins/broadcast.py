@@ -1,14 +1,15 @@
 #  @MrMNTG @MusammilN
-# please give credits https://github.com/MN-BOTS/ShobanaFilterBot
+#please give credits https://github.com/MN-BOTS/ShobanaFilterBot
 
 from pyrogram import Client, filters
 from pyrogram.errors import FloodWait
 import datetime
 import time
-import asyncio
+import random
 from database.users_chats_db import db
 from info import ADMINS
 from utils import broadcast_messages
+import asyncio
 
 # ── Tuning ──────────────────────────────────────────────────────────────────
 MAX_CONCURRENT  = 100  # ⬆ raised: Telegram allows ~30 msg/sec per bot session
@@ -160,10 +161,24 @@ async def _send_group_one(sem: asyncio.Semaphore, chat_id: int, b_msg, stats: Br
                 await asyncio.sleep(e.value + 2)
                 retries += 1
             except Exception:
-                await stats.record("failed")
-                return
-        await stats.record("failed")
+                failed += 1
+        except Exception:
+            failed += 1
 
+    tasks = []
+    async for chat in chats:
+        tasks.append(send_group_message(chat))
+        done += 1
+
+        if len(tasks) >= BROADCAST_BATCH_SIZE:
+            await asyncio.gather(*tasks)
+            tasks = []
+            await sts.edit(
+                f"Group broadcast in progress:\n\nTotal Groups: {total_chats}\nCompleted: {done} / {total_chats}\n"
+                f"Success: {success} | Failed: {failed}"
+            )
+            sleep_time = random.uniform(BROADCAST_SLEEP_MIN, BROADCAST_SLEEP_MAX)
+            await asyncio.sleep(sleep_time)
 
 @Client.on_message(filters.command("grpbroadcast") & filters.user(ADMINS) & filters.reply)
 async def grpbroadcast(bot, message):
@@ -208,4 +223,4 @@ async def grpbroadcast(bot, message):
     )
 
 #  @MrMNTG @MusammilN
-# please give credits https://github.com/MN-BOTS/ShobanaFilterBot
+#please give credits https://github.com/MN-BOTS/ShobanaFilterBot
