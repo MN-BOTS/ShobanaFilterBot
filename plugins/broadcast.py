@@ -11,7 +11,7 @@ from info import ADMINS
 from utils import broadcast_messages
 
 # ── Tuning ──────────────────────────────────────────────────────────────────
-MAX_CONCURRENT  = 150  # ⬆ raised: Telegram allows ~30 msg/sec per bot session
+MAX_CONCURRENT  = 100  # ⬆ raised: Telegram allows ~30 msg/sec per bot session
 CHUNK_SIZE      = 150  # process this many tasks per gather round
 BATCH_UPDATE_AT = 500  # update status every N sends (less edits = less flood)
 # ────────────────────────────────────────────────────────────────────────────
