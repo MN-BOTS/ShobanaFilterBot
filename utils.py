@@ -58,32 +58,32 @@ async def is_subscribed(user_id: int, client) -> bool:
     if not auth_channels:
         return True  # No channels to check
 
-    # Check if user is joined in channels
-    joined_all = True
+    requested_channels = JOIN_REQUEST_USERS.get(user_id, set()) if REQUEST_FSUB_MODE else set()
+
     for channel in auth_channels:
+        is_member = False
         try:
             member = await client.get_chat_member(channel, user_id)
-            if member.status not in [
+            if member.status in [
                 ChatMemberStatus.MEMBER,
                 ChatMemberStatus.ADMINISTRATOR,
                 ChatMemberStatus.OWNER,
             ]:
-                joined_all = False
-                break
+                is_member = True
         except Exception:
-            joined_all = False
-            break
+            pass
 
-    if joined_all:
-        return True
+        if is_member:
+            continue  # Channel satisfied via membership/admin
 
-    # If REQUEST_FSUB_MODE is True, check join requests
-    if REQUEST_FSUB_MODE:
-        requested_channels = JOIN_REQUEST_USERS.get(user_id, set())
-        if set(auth_channels).issubset(requested_channels):
-            return True
+        # If REQUEST_FSUB_MODE is enabled, also accept a pending join request
+        if REQUEST_FSUB_MODE and channel in requested_channels:
+            continue  # Channel satisfied via join request
 
-    return False
+        # Channel not satisfied by either condition
+        return False
+
+    return True
 
 async def create_invite_links(client) -> dict:
     links = {}
