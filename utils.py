@@ -102,6 +102,19 @@ async def create_invite_links(client) -> dict:
 
 #  @MrMNTG @MusammilN
 #please give credits https://github.com/MN-BOTS/ShobanaFilterBot
+
+
+def search_imdb(query, page=1):
+    search_url = f"{IMDB_API_BASE}?q={quote_plus(query)}&page={page}"
+    response = requests.get(search_url, timeout=10)
+    response.raise_for_status()
+    data = response.json()
+    return {
+        "results": data.get("Search") or [],
+        "page": int(data.get("page") or page),
+        "next_page": data.get("nextPage"),
+        "total_results": int(data.get("totalResults") or 0),
+    }
 async def get_poster(query, bulk=False, id=False, file=None):
     if not id:
         # https://t.me/GetTGLink/4183
@@ -117,11 +130,8 @@ async def get_poster(query, bulk=False, id=False, file=None):
                 year = list_to_str(year[:1]) 
         else:
             year = None
-        search_url = f"{IMDB_API_BASE}?q={quote_plus(title)}"
-        response = requests.get(search_url, timeout=10)
-        response.raise_for_status()
-        search_data = response.json()
-        movie_list = search_data.get("Search") or []
+        search_data = search_imdb(title, page=1)
+        movie_list = search_data.get("results") or []
         if not movie_list:
             return None
         if year:
