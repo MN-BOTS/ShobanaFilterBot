@@ -4,7 +4,6 @@
 import logging
 from pyrogram.errors import InputUserDeactivated, UserNotParticipant, FloodWait, UserIsBlocked, PeerIdInvalid
 from info import LONG_IMDB_DESCRIPTION, MAX_LIST_ELM
-from imdb import IMDb
 import asyncio
 from pyrogram.types import Message, InlineKeyboardButton
 from pyrogram import enums
@@ -16,6 +15,7 @@ from typing import List
 from database.users_chats_db import db
 from bs4 import BeautifulSoup
 import requests
+from urllib.parse import quote_plus
 
 #  @MrMNTG @MusammilN
 #please give credits https://github.com/MN-BOTS/ShobanaFilterBot
@@ -26,7 +26,7 @@ BTN_URL_REGEX = re.compile(
     r"(\[([^\[]+?)\]\((buttonurl|buttonalert):(?:/{0,2})(.+?)(:same)?\))"
 )
 
-imdb = IMDb() 
+IMDB_API_BASE = "https://mn-api-imdb.vercel.app/api/search"
 
 BANNED = {}
 SMART_OPEN = '“'
@@ -58,32 +58,32 @@ async def is_subscribed(user_id: int, client) -> bool:
     if not auth_channels:
         return True  # No channels to check
 
-    # Check if user is joined in channels
-    joined_all = True
+    requested_channels = JOIN_REQUEST_USERS.get(user_id, set()) if REQUEST_FSUB_MODE else set()
+
     for channel in auth_channels:
+        is_member = False
         try:
             member = await client.get_chat_member(channel, user_id)
-            if member.status not in [
+            if member.status in [
                 ChatMemberStatus.MEMBER,
                 ChatMemberStatus.ADMINISTRATOR,
                 ChatMemberStatus.OWNER,
             ]:
-                joined_all = False
-                break
+                is_member = True
         except Exception:
-            joined_all = False
-            break
+            pass
 
-    if joined_all:
-        return True
+        if is_member:
+            continue  # Channel satisfied via membership/admin
 
-    # If REQUEST_FSUB_MODE is True, check join requests
-    if REQUEST_FSUB_MODE:
-        requested_channels = JOIN_REQUEST_USERS.get(user_id, set())
-        if set(auth_channels).issubset(requested_channels):
-            return True
+        # If REQUEST_FSUB_MODE is enabled, also accept a pending join request
+        if REQUEST_FSUB_MODE and channel in requested_channels:
+            continue  # Channel satisfied via join request
 
-    return False
+        # Channel not satisfied by either condition
+        return False
+
+    return True
 
 async def create_invite_links(client) -> dict:
     links = {}
@@ -102,6 +102,19 @@ async def create_invite_links(client) -> dict:
 
 #  @MrMNTG @MusammilN
 #please give credits https://github.com/MN-BOTS/ShobanaFilterBot
+
+
+def search_imdb(query, page=1):
+    search_url = f"{IMDB_API_BASE}?q={quote_plus(query)}&page={page}"
+    response = requests.get(search_url, timeout=10)
+    response.raise_for_status()
+    data = response.json()
+    return {
+        "results": data.get("Search") or [],
+        "page": int(data.get("page") or page),
+        "next_page": data.get("nextPage"),
+        "total_results": int(data.get("totalResults") or 0),
+    }
 async def get_poster(query, bulk=False, id=False, file=None):
     if not id:
         # https://t.me/GetTGLink/4183
@@ -117,68 +130,60 @@ async def get_poster(query, bulk=False, id=False, file=None):
                 year = list_to_str(year[:1]) 
         else:
             year = None
-        movieid = imdb.search_movie(title.lower(), results=10)
-        if not movieid:
+        search_data = search_imdb(title, page=1)
+        movie_list = search_data.get("results") or []
+        if not movie_list:
             return None
         if year:
-            filtered=list(filter(lambda k: str(k.get('year')) == str(year), movieid))
+            filtered = [m for m in movie_list if str(m.get("Year")) == str(year)]
             if not filtered:
-                filtered = movieid
+                filtered = movie_list
         else:
-            filtered = movieid
-        movieid=list(filter(lambda k: k.get('kind') in ['movie', 'tv series'], filtered))
-        if not movieid:
-            movieid = filtered
+            filtered = movie_list
+        movie_list = [m for m in filtered if m.get("Type") in ["movie", "series", "tvseries"]] or filtered
         if bulk:
-            return movieid
-        movieid = movieid[0].movieID
+            return movie_list
+        movieid = movie_list[0].get("imdbID")
     else:
         movieid = query
-    movie = imdb.get_movie(movieid)
-    if movie.get("original air date"):
-        date = movie["original air date"]
-    elif movie.get("year"):
-        date = movie.get("year")
-    else:
-        date = "N/A"
-    plot = ""
-    if not LONG_IMDB_DESCRIPTION:
-        plot = movie.get('plot')
-        if plot and len(plot) > 0:
-            plot = plot[0]
-    else:
-        plot = movie.get('plot outline')
+
+    details_url = f"{IMDB_API_BASE}?id={movieid}"
+    response = requests.get(details_url, timeout=10)
+    response.raise_for_status()
+    movie = response.json()
+
+    plot = movie.get("Plot") or ""
     if plot and len(plot) > 800:
-        plot = plot[0:800] + "..."
+        plot = plot[:800] + "..."
 
     return {
-        'title': movie.get('title'),
-        'votes': movie.get('votes'),
-        "aka": list_to_str(movie.get("akas")),
-        "seasons": movie.get("number of seasons"),
-        "box_office": movie.get('box office'),
-        'localized_title': movie.get('localized title'),
-        'kind': movie.get("kind"),
-        "imdb_id": f"tt{movie.get('imdbID')}",
-        "cast": list_to_str(movie.get("cast")),
-        "runtime": list_to_str(movie.get("runtimes")),
-        "countries": list_to_str(movie.get("countries")),
-        "certificates": list_to_str(movie.get("certificates")),
-        "languages": list_to_str(movie.get("languages")),
-        "director": list_to_str(movie.get("director")),
-        "writer":list_to_str(movie.get("writer")),
-        "producer":list_to_str(movie.get("producer")),
-        "composer":list_to_str(movie.get("composer")) ,
-        "cinematographer":list_to_str(movie.get("cinematographer")),
-        "music_team": list_to_str(movie.get("music department")),
-        "distributors": list_to_str(movie.get("distributors")),
-        'release_date': date,
-        'year': movie.get('year'),
-        'genres': list_to_str(movie.get("genres")),
-        'poster': movie.get('full-size cover url'),
+        'title': movie.get('Title'),
+        'votes': "N/A",
+        "aka": "N/A",
+        "seasons": "N/A",
+        "box_office": "N/A",
+        'localized_title': movie.get('Title'),
+        'kind': movie.get("Type", "movie"),
+        "imdb_id": movie.get('imdbID'),
+        "cast": movie.get("Stars", "N/A"),
+        "runtime": movie.get("Runtime", "N/A"),
+        "countries": "N/A",
+        "certificates": "N/A",
+        "languages": movie.get("Language", "N/A"),
+        "director": movie.get("Director", "N/A"),
+        "writer": movie.get("Writer", "N/A"),
+        "producer": "N/A",
+        "composer": "N/A",
+        "cinematographer": "N/A",
+        "music_team": "N/A",
+        "distributors": "N/A",
+        'release_date': movie.get("ReleaseDate") or movie.get("Year") or "N/A",
+        'year': movie.get('Year'),
+        'genres': movie.get("Genres", "N/A"),
+        'poster': movie.get('Poster'),
         'plot': plot,
-        'rating': str(movie.get("rating")),
-        'url':f'https://www.imdb.com/title/tt{movieid}'
+        'rating': str(movie.get("imdbRating", "N/A")),
+        'url': f"https://www.imdb.com/title/{movieid}"
     }
 # https://github.com/odysseusmax/animated-lamp/blob/2ef4730eb2b5f0596ed6d03e7b05243d93e3415b/bot/utils/broadcast.py#L37
 
