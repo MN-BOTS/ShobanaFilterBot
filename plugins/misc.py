@@ -2,7 +2,7 @@ import os
 from pyrogram import Client, filters, enums
 from pyrogram.errors.exceptions.bad_request_400 import UserNotParticipant, MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty
 from info import IMDB_TEMPLATE
-from utils import extract_user, get_file_id, get_poster, last_online
+from utils import extract_user, get_file_id, get_poster, last_online, search_imdb
 import time
 from datetime import datetime
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -129,24 +129,55 @@ async def who_is(client, message):
 
 @Client.on_message(filters.command(["imdb", 'mnsearch']))
 async def imdb_search(client, message):
-    if ' ' in message.text:
-        k = await message.reply('Searching ImDB')
-        r, title = message.text.split(None, 1)
-        movies = await get_poster(title, bulk=True)
-        if not movies:
-            return await message.reply("No results Found")
-        btn = [
-            [
-                InlineKeyboardButton(
-                    text=f"{movie.get('title')} - {movie.get('year')}",
-                    callback_data=f"imdb#{movie.movieID}",
-                )
-            ]
-            for movie in movies
-        ]
-        await k.edit('Here is what i found on IMDb', reply_markup=InlineKeyboardMarkup(btn))
-    else:
-        await message.reply('Give me a movie / series Name')
+    if ' ' not in message.text:
+        return await message.reply('Give me a movie / series Name')
+
+    k = await message.reply('Searching ImDB')
+    _, title = message.text.split(None, 1)
+    data = search_imdb(title, page=1)
+    movies = data.get("results")
+    if not movies:
+        return await k.edit("No results Found")
+
+    btn = [[InlineKeyboardButton(
+        text=f"{movie.get('Title') or movie.get('title')} - {movie.get('Year') or movie.get('year')}",
+        callback_data=f"imdb#{movie.get('imdbID')}",
+    )] for movie in movies]
+
+    nav = []
+    if data.get("next_page"):
+        nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"imdbpg#{title}#{data['next_page']}"))
+    if nav:
+        btn.append(nav)
+
+    await k.edit('Here is what i found on IMDb', reply_markup=InlineKeyboardMarkup(btn))
+
+
+@Client.on_callback_query(filters.regex('^imdbpg#'))
+async def imdb_page_callback(bot: Client, quer_y: CallbackQuery):
+    _, title, page = quer_y.data.split('#', 2)
+    page = int(page)
+    data = search_imdb(title, page=page)
+    movies = data.get("results")
+    if not movies:
+        await quer_y.answer("No more results", show_alert=True)
+        return
+
+    btn = [[InlineKeyboardButton(
+        text=f"{movie.get('Title') or movie.get('title')} - {movie.get('Year') or movie.get('year')}",
+        callback_data=f"imdb#{movie.get('imdbID')}",
+    )] for movie in movies]
+
+    nav = []
+    if page > 1:
+        nav.append(InlineKeyboardButton("◀️ Previous", callback_data=f"imdbpg#{title}#{page-1}"))
+    if data.get("next_page"):
+        nav.append(InlineKeyboardButton("Next ▶️", callback_data=f"imdbpg#{title}#{data['next_page']}"))
+    if nav:
+        btn.append(nav)
+
+    await quer_y.message.edit_reply_markup(InlineKeyboardMarkup(btn))
+    await quer_y.answer()
 
 @Client.on_callback_query(filters.regex('^imdb'))
 async def imdb_callback(bot: Client, quer_y: CallbackQuery):
