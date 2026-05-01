@@ -2,7 +2,6 @@ import asyncio
 import logging
 import re
 from datetime import datetime, timezone
-from urllib.parse import quote_plus
 
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
@@ -70,15 +69,15 @@ async def post_new_content_update(bot: Client, file_name: str):
     lang = detect_language(file_name)
     genre = imdb.get("genres") or "N/A"
     text = (
-        f"<b>{name}</b>\n"
-        f"genre: <b>{genre}</b>\n"
-        + (f"language: <b>{lang}</b>\n" if lang else "") +
-        f"imdb details: ⭐ {imdb.get('rating', 'N/A')} | 📅 {imdb.get('year', 'N/A')} | 🎭 {imdb.get('kind', 'N/A')}\n"
-        f"more: {imdb.get('url', '')}"
+        f"🎬 <b>{name}</b>\n\n"
+        f"• <b>Genre:</b> {genre}\n"
+        + (f"• <b>Language:</b> {lang}\n" if lang else "") +
+        f"• <b>IMDb:</b> ⭐ {imdb.get('rating', 'N/A')} | 📅 {imdb.get('year', 'N/A')} | 🎭 {imdb.get('kind', 'N/A')}\n"
+        f"• <b>More:</b> {imdb.get('url', '')}"
     )
     bot_username = (await bot.get_me()).username
-    start_key = quote_plus(name.replace(" ", "_"))
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔎 Search", url=f"tg://resolve?domain={bot_username}&start=mntgx_{start_key}")]])
+    start_key = re.sub(r"[^a-zA-Z0-9_]+", "_", name).strip("_")
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔍 Search in Bot", url=f"tg://resolve?domain={bot_username}&start=mntgx_{start_key}")]])
 
     channel_ids = await db.get_update_chat_ids()
     for cid in channel_ids:

@@ -262,8 +262,9 @@ async def start(client, message):
             searches = payload.split('-', 1)[1]
         else:
             searches = ''
-        search = searches.replace('-', ' ').replace('_', ' ')
-        message.text = search 
+        search = searches.replace('-', ' ').replace('_', ' ').strip()
+        message.text = search
+        message.command = [search]
         await auto_filter(client, message) 
         return
     data = message.command[1]
