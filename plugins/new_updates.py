@@ -49,7 +49,8 @@ def parse_title_year_and_season(file_name: str):
     title = clean
     if year_match:
         title = clean.split(year_match.group(1))[0].strip(" -._")
-    title = re.sub(r"\b(1080p|720p|480p|x264|x265|webrip|hdrip|web-dl|blu ?ray|aac|esub|mkv|mp4)\b", "", title, flags=re.I).strip()
+    title = re.sub(r"\b(s\d{1,2}e\d{1,3}|season\s*\d+|episode\s*\d+|ep\s*\d+|e\d{1,3})\b", "", title, flags=re.I).strip()
+    title = re.sub(r"\b(1080p|720p|480p|x264|x265|webrip|hdrip|web-dl|blu ?ray|aac|esub|mkv|mp4|hdtv|hq)\b", "", title, flags=re.I).strip()
     title = normalize_compact_title(re.sub(r"\s+", " ", title)).strip()
     return title.strip() or clean.strip(), year_match.group(1) if year_match else None, season_match.group(1) if season_match else None
 
@@ -77,6 +78,9 @@ async def post_new_content_update(bot: Client, file_name: str):
         return
 
     imdb = await get_poster(title, file=file_name)
+    if not imdb:
+        fallback = re.sub(r"\b(19\d{2}|20\d{2})\b", "", title).strip()
+        imdb = await get_poster(fallback or title, file=file_name)
     if not imdb:
         return
 

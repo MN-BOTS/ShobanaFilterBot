@@ -49,7 +49,14 @@ async def list_movies(bot: Client, message: Message):
 
     grouped = {}
     for raw in movies:
-        title = cleaned_movie_title(raw)
+        low = raw.lower()
+        if not re.search(r"\b(19\d{2}|20\d{2})\b", raw):
+            continue
+        if re.search(r"\b(episode|ep\s*\d+|e\d{1,3}|s\d{1,2}|season\s*\d+)\b", low):
+            continue
+        year = re.search(r"\b(19\d{2}|20\d{2})\b", raw)
+        before_year = re.split(rf"\b{year.group(1)}\b", re.sub(r"[._\-]+", " ", raw), maxsplit=1)[0].strip() if year else cleaned_movie_title(raw)
+        title = f"{before_year} {year.group(1)}".strip() if year else cleaned_movie_title(raw)
         langs, quality = extract_lang_quality(raw)
         data = grouped.setdefault(title, {"langs": set(), "qualities": set()})
         data["langs"].update(langs)
