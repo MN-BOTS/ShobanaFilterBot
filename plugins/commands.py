@@ -214,6 +214,21 @@ async def start(client, message):
             parse_mode=enums.ParseMode.HTML
         )
         return
+    if len(message.command) == 2 and message.command[1].startswith('mntgx'):
+        payload = message.command[1]
+        if '_' in payload:
+            searches = payload.split('_', 1)[1]
+        elif '-' in payload:
+            searches = payload.split('-', 1)[1]
+        else:
+            searches = ''
+        search = searches.replace('-', ' ').replace('_', ' ').strip()
+        if search:
+            fake = await client.send_message(message.chat.id, search)
+            await auto_filter(client, fake)
+            await fake.delete()
+        return
+
     if not await is_subscribed(message.from_user.id, client):
         links = await create_invite_links(client)
         btn = [[InlineKeyboardButton("🤖 Join Updates Channel", url=url)] for url in links.values()]
@@ -254,20 +269,6 @@ async def start(client, message):
         )
         return
     
-    if len(message.command) == 2 and message.command[1].startswith('mntgx'):
-        payload = message.command[1]
-        if '_' in payload:
-            searches = payload.split('_', 1)[1]
-        elif '-' in payload:
-            searches = payload.split('-', 1)[1]
-        else:
-            searches = ''
-        search = searches.replace('-', ' ').replace('_', ' ').strip()
-        if search:
-            fake = await client.send_message(message.chat.id, search)
-            await auto_filter(client, fake)
-            await fake.delete()
-        return
     data = message.command[1]
     try:
         pre, file_id = data.split('_', 1)
