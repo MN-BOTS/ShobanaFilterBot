@@ -296,10 +296,10 @@ class Database:
     async def get_new_updates_enabled(self) -> bool:
         if self.use_mongo:
             doc = await self.config.find_one({"_id": "new_updates_enabled"})
-            return bool(doc.get("value", False)) if doc else False
+            return bool(doc.get("value", True)) if doc else True
         with store.begin() as conn:
             row = conn.execute(text("SELECT value_json FROM config_data WHERE key_name='new_updates_enabled'"))
-            return bool(store.from_json(row.scalar(), False))
+            return bool(store.from_json(row.scalar(), True))
 
     async def add_announced_key(self, key: str):
         if self.use_mongo:
