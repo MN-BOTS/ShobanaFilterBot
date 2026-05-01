@@ -263,5 +263,79 @@ class Database:
             size = conn.execute(text("SELECT pg_database_size(current_database())")).scalar()
             return int(size or 0)
 
+    async def set_update_chat_ids(self, chat_ids: list[int]):
+        if self.use_mongo:
+            await self.config.update_one({"_id": "update_chat_ids"}, {"$set": {"value": chat_ids}}, upsert=True)
+            return
+        with store.begin() as conn:
+            exists = conn.execute(text("SELECT 1 FROM config_data WHERE key_name='update_chat_ids'"), {}).first()
+            if exists:
+                conn.execute(text("UPDATE config_data SET value_json=:value WHERE key_name='update_chat_ids'"), {"value": store.to_json(chat_ids)})
+            else:
+                conn.execute(text("INSERT INTO config_data(key_name, value_json) VALUES ('update_chat_ids', :value)"), {"value": store.to_json(chat_ids)})
+
+    async def get_update_chat_ids(self) -> list[int]:
+        if self.use_mongo:
+            doc = await self.config.find_one({"_id": "update_chat_ids"})
+            return doc.get("value", []) if doc else []
+        with store.begin() as conn:
+            row = conn.execute(text("SELECT value_json FROM config_data WHERE key_name='update_chat_ids'"))
+            return store.from_json(row.scalar(), [])
+
+    async def set_new_updates_enabled(self, enabled: bool):
+        if self.use_mongo:
+            await self.config.update_one({"_id": "new_updates_enabled"}, {"$set": {"value": bool(enabled)}}, upsert=True)
+            return
+        with store.begin() as conn:
+            exists = conn.execute(text("SELECT 1 FROM config_data WHERE key_name='new_updates_enabled'"), {}).first()
+            if exists:
+                conn.execute(text("UPDATE config_data SET value_json=:value WHERE key_name='new_updates_enabled'"), {"value": store.to_json(bool(enabled))})
+            else:
+                conn.execute(text("INSERT INTO config_data(key_name, value_json) VALUES ('new_updates_enabled', :value)"), {"value": store.to_json(bool(enabled))})
+
+    async def get_new_updates_enabled(self) -> bool:
+        if self.use_mongo:
+            doc = await self.config.find_one({"_id": "new_updates_enabled"})
+            return bool(doc.get("value", False)) if doc else False
+        with store.begin() as conn:
+            row = conn.execute(text("SELECT value_json FROM config_data WHERE key_name='new_updates_enabled'"))
+            return bool(store.from_json(row.scalar(), False))
+
+    async def add_announced_key(self, key: str):
+        if self.use_mongo:
+            await self.config.update_one({"_id": "announced_keys"}, {"$addToSet": {"keys": key}}, upsert=True)
+            return
+
+    async def check_announced_key(self, key: str) -> bool:
+        if self.use_mongo:
+            doc = await self.config.find_one({"_id": "announced_keys", "keys": key})
+            return bool(doc)
+        return False
+
+    async def add_daily_added(self, title: str):
+        if self.use_mongo:
+            await self.config.update_one({"_id": "daily_added"}, {"$push": {"items": title}}, upsert=True)
+            return
+
+    async def get_daily_added(self):
+        if self.use_mongo:
+            doc = await self.config.find_one({"_id": "daily_added"})
+            return doc.get("items", []) if doc else []
+        return []
+
+    async def clear_daily_added(self):
+        if self.use_mongo:
+            await self.config.update_one({"_id": "daily_added"}, {"$set": {"items": []}}, upsert=True)
+
+    async def mark_daily_summary_done(self, day_key: str):
+        if self.use_mongo:
+            await self.config.update_one({"_id": "daily_summary"}, {"$set": {"day": day_key}}, upsert=True)
+
+    async def is_daily_summary_done(self, day_key: str) -> bool:
+        if self.use_mongo:
+            doc = await self.config.find_one({"_id": "daily_summary"})
+            return bool(doc and doc.get("day") == day_key)
+        return False
+
 
 db = Database(DATABASE_URI, DATABASE_NAME)

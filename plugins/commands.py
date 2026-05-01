@@ -255,8 +255,14 @@ async def start(client, message):
         return
     
     if len(message.command) == 2 and message.command[1].startswith('mntgx'):
-        searches = message.command[1].split("-", 1)[1] 
-        search = searches.replace('-',' ')
+        payload = message.command[1]
+        if '_' in payload:
+            searches = payload.split('_', 1)[1]
+        elif '-' in payload:
+            searches = payload.split('-', 1)[1]
+        else:
+            searches = ''
+        search = searches.replace('-', ' ').replace('_', ' ')
         message.text = search 
         await auto_filter(client, message) 
         return

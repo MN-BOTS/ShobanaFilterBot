@@ -1,6 +1,7 @@
 from pyrogram import Client, filters
 from info import CHANNELS
 from database.ia_filterdb import save_file
+from plugins.new_updates import post_new_content_update
 
 media_filter = filters.document | filters.video | filters.audio
 
@@ -17,4 +18,6 @@ async def media(bot, message):
 
     media.file_type = file_type
     media.caption = message.caption
-    await save_file(media)
+    saved, _ = await save_file(media)
+    if saved:
+        await post_new_content_update(bot, getattr(media, "file_name", ""))
