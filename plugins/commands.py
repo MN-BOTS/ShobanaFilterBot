@@ -263,9 +263,10 @@ async def start(client, message):
         else:
             searches = ''
         search = searches.replace('-', ' ').replace('_', ' ').strip()
-        message.text = search
-        message.command = [search]
-        await auto_filter(client, message) 
+        if search:
+            fake = await client.send_message(message.chat.id, search)
+            await auto_filter(client, fake)
+            await fake.delete()
         return
     data = message.command[1]
     try:

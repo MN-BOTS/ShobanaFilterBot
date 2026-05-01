@@ -40,10 +40,8 @@ def detect_language(file_name: str):
 
 
 async def should_post_update(file_name: str):
-    title, year, _ = parse_title_year_and_season(file_name)
-    if year is None:
-        return False, None, None, None
-    key = f"{title.lower()}::{year}"
+    title, year, season = parse_title_year_and_season(file_name)
+    key = f"{title.lower()}::{year or 'na'}::s{season or '0'}"
     already = await db.check_announced_key(key)
     return not already, key, title, year
 
@@ -77,7 +75,7 @@ async def post_new_content_update(bot: Client, file_name: str):
     )
     bot_username = (await bot.get_me()).username
     start_key = re.sub(r"[^a-zA-Z0-9_]+", "_", name).strip("_")
-    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔍 Search in Bot", url=f"tg://resolve?domain={bot_username}&start=mntgx_{start_key}")]])
+    btn = InlineKeyboardMarkup([[InlineKeyboardButton("🔍 Search in Bot", url=f"https://t.me/{bot_username}?start=mntgx_{start_key}")]])
 
     channel_ids = await db.get_update_chat_ids()
     for cid in channel_ids:
