@@ -22,14 +22,35 @@ LANG_MAP = {
 }
 
 
+
+def normalize_compact_title(title: str) -> str:
+    parts = title.split()
+    compact = []
+    i = 0
+    while i < len(parts):
+        if len(parts[i]) == 1 and parts[i].isalpha():
+            letters = [parts[i]]
+            j = i + 1
+            while j < len(parts) and len(parts[j]) == 1 and parts[j].isalpha():
+                letters.append(parts[j])
+                j += 1
+            if len(letters) >= 2:
+                compact.append(''.join(letters))
+                i = j
+                continue
+        compact.append(parts[i])
+        i += 1
+    return ' '.join(compact)
+
 def parse_title_year_and_season(file_name: str):
     clean = re.sub(r"[._\-]+", " ", file_name)
-    year_match = re.search(r"\b(202[6-8])\b", clean)
+    year_match = re.search(r"\b((?:19|20)\d{2})\b", clean)
     season_match = re.search(r"\b(?:s(?:eason)?\s*0?(\d{1,2}))\b", clean, re.I)
     title = clean
     if year_match:
         title = clean.split(year_match.group(1))[0].strip(" -._")
-    title = re.sub(r"\b(1080p|720p|x264|x265|webrip|hdrip|blu ?ray|aac|esub)\b", "", title, flags=re.I).strip()
+    title = re.sub(r"\b(1080p|720p|480p|x264|x265|webrip|hdrip|web-dl|blu ?ray|aac|esub|mkv|mp4)\b", "", title, flags=re.I).strip()
+    title = normalize_compact_title(re.sub(r"\s+", " ", title)).strip()
     return title.strip() or clean.strip(), year_match.group(1) if year_match else None, season_match.group(1) if season_match else None
 
 
