@@ -224,9 +224,8 @@ async def start(client, message):
             searches = ''
         search = searches.replace('-', ' ').replace('_', ' ').strip()
         if search:
-            fake = await client.send_message(message.chat.id, search)
-            await auto_filter(client, fake)
-            await fake.delete()
+            message.text = search
+            await auto_filter(client, message)
         return
 
     if not await is_subscribed(message.from_user.id, client):
