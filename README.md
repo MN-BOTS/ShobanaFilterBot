@@ -63,6 +63,7 @@
 - ✅ Delete Files by Query: Use the /deletefiles <keyword> command to delete all files containing a specific word in their name. For example, /deletefiles predvd removes all files with 'predvd' in their filename.
 - ✅ Auto delete for files.
 - ✅ Channel file sending mode with multiple channel support.
+- ✅ Auto command sync: bot updates BotFather command menu at startup.
 - ✅ SQL database (postgrasql) support (Optional).
 - ✅ 5 MongoDb support (optional).
 
@@ -140,6 +141,8 @@ usage - Show resource usage
 set_template - Set custom template
 setskip - Set skip settings
 clear_join_users - Clear join users data
+
+Note: Commands are automatically synced to Telegram (BotFather menu) when the bot starts.
 ```
 
 ## 🔧 Variables
