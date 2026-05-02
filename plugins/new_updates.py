@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 PAGE_SIZE          = 20   # items per page in the daily summary
 SEND_DELAY         = 0.5  # seconds between channel sends (flood-wait safety)
 GETDLINK_PAGE_SIZE = 10    # results per page in /getdlink picker (no hard cap)
-GROUP_SIZE         = 25   # number of titles per grouped channel message
+GROUP_SIZE         = 10   # number of titles per grouped channel message
 
 # ─── Channel send mode ────────────────────────────────────────────────────────
 # "individual" → send each title as its own IMDb card message (with button)
