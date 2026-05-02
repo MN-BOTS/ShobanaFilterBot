@@ -17,12 +17,13 @@ logger = logging.getLogger(__name__)
 PAGE_SIZE          = 20   # items per page in the daily summary
 SEND_DELAY         = 0.5  # seconds between channel sends (flood-wait safety)
 GETDLINK_PAGE_SIZE = 10    # results per page in /getdlink picker (no hard cap)
-GROUP_SIZE         = 10   # number of titles per grouped channel message
+GROUP_SIZE         = 25   # number of titles per grouped channel message
 
 # ─── Channel send mode ────────────────────────────────────────────────────────
-# "individual" → send each movie/series as its own message (with IMDb card + button)
-# "grouped"    → accumulate titles and send a plain list of 25 in one message (no callbacks)
-CHANNEL_SEND_MODE: str = "grouped"
+# "individual" → send each title as its own IMDb card message (with button)
+# "grouped"    → accumulate, auto-flush every GROUP_SIZE titles as a plain list
+# "manual"     → accumulate forever; admin triggers send with /sendupnow
+CHANNEL_SEND_MODE: str = "manual"
 
 # ─── Grouped message footer ───────────────────────────────────────────────────
 # Shown at the bottom of every grouped channel post. Edit to match your bot/channel.
@@ -474,11 +475,12 @@ async def _send_to_channels(
         return sent
 
     else:
-        # ── Grouped mode: accumulate and flush every GROUP_SIZE items ─────────
+        # ── Grouped / Manual mode: accumulate entries ─────────────────────────
         _pending_group.append(list_entry or display_name)
         logger.debug("Group buffer: %d/%d", len(_pending_group), GROUP_SIZE)
 
-        if len(_pending_group) >= GROUP_SIZE:
+        # In "manual" mode we never auto-flush — admin uses /sendupnow
+        if CHANNEL_SEND_MODE == "grouped" and len(_pending_group) >= GROUP_SIZE:
             batch          = _pending_group[:GROUP_SIZE]
             _pending_group = _pending_group[GROUP_SIZE:]
             await _flush_group_to_channels(bot, batch)
@@ -1111,6 +1113,98 @@ async def run_daily_summary(bot: Client) -> None:
                 last_summary_date = today
 
         await asyncio.sleep(60)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  /sendupnow  –  manually flush the grouped buffer to channels
+#
+#  Works in all modes:
+#   • "grouped" / "manual" → flushes _pending_group now, in batches of GROUP_SIZE
+#   • "individual"         → tells the admin nothing is pending (nothing to flush)
+#
+#  Flow:
+#   1. Admin sends /sendupnow
+#   2. Bot shows how many titles are buffered + a confirm/cancel keyboard
+#   3. Admin taps ✅ Confirm → all pending titles are sent as grouped message(s)
+# ══════════════════════════════════════════════════════════════════════════════
+
+@Client.on_message(filters.command("sendupnow") & filters.user(ADMINS) & filters.private)
+async def sendupnow_cmd(bot: Client, message) -> None:
+    global _pending_group
+
+    if CHANNEL_SEND_MODE == "individual":
+        return await message.reply(
+            "ℹ️ Bot is in <b>individual</b> mode — titles are sent instantly as they arrive.\n"
+            "Switch <code>CHANNEL_SEND_MODE</code> to <code>grouped</code> or <code>manual</code> to use this command.",
+            parse_mode=ParseMode.HTML,
+        )
+
+    count = len(_pending_group)
+    if count == 0:
+        return await message.reply(
+            "📭 The buffer is empty — no pending titles to send.",
+            parse_mode=ParseMode.HTML,
+        )
+
+    # Build a short preview of what's in the buffer (up to 10 titles)
+    preview_lines = []
+    for i, entry in enumerate(_pending_group[:10], 1):
+        emoji, title, lang, qual = _resolve_group_entry(entry)
+        preview_lines.append(f"  {i:>2}. {emoji} {title}")
+    if count > 10:
+        preview_lines.append(f"  … and {count - 10} more")
+
+    batches = -(-count // GROUP_SIZE)   # ceiling division
+    preview = "\n".join(preview_lines)
+
+    markup = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Send Now", callback_data="sendupnow:confirm"),
+        InlineKeyboardButton("❌ Cancel",   callback_data="sendupnow:cancel"),
+    ]])
+
+    await message.reply(
+        f"<b>📤 Ready to send {count} title(s) to channels</b>\n"
+        f"Will be split into <b>{batches}</b> message(s) of up to {GROUP_SIZE} each.\n\n"
+        f"<b>Pending titles:</b>\n{preview}\n\n"
+        f"Tap <b>Send Now</b> to flush immediately.",
+        parse_mode=ParseMode.HTML,
+        reply_markup=markup,
+    )
+
+
+@Client.on_callback_query(filters.regex(r"^sendupnow:(confirm|cancel)$") & filters.user(ADMINS))
+async def sendupnow_callback(bot: Client, query) -> None:
+    global _pending_group
+
+    action = query.matches[0].group(1)
+
+    if action == "cancel":
+        await query.edit_message_text("❌ Cancelled. Buffer still has the pending titles.")
+        await query.answer()
+        return
+
+    # ── Confirm: flush all pending entries in GROUP_SIZE batches ─────────────
+    count = len(_pending_group)
+    if count == 0:
+        await query.edit_message_text("📭 Nothing in the buffer anymore.")
+        await query.answer()
+        return
+
+    to_send        = _pending_group[:]
+    _pending_group = []
+
+    sent_batches = 0
+    while to_send:
+        batch    = to_send[:GROUP_SIZE]
+        to_send  = to_send[GROUP_SIZE:]
+        await _flush_group_to_channels(bot, batch)
+        sent_batches += 1
+
+    await query.edit_message_text(
+        f"✅ Sent <b>{count}</b> title(s) across <b>{sent_batches}</b> message(s) to all update channels.",
+        parse_mode=ParseMode.HTML,
+    )
+    await query.answer("Sent!", show_alert=False)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
