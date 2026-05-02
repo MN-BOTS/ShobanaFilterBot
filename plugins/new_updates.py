@@ -23,7 +23,7 @@ GROUP_SIZE         = 25   # number of titles per grouped channel message
 # "individual" → send each title as its own IMDb card message (with button)
 # "grouped"    → accumulate, auto-flush every GROUP_SIZE titles as a plain list
 # "manual"     → accumulate forever; admin triggers send with /sendupnow
-CHANNEL_SEND_MODE: str = "grouped"
+CHANNEL_SEND_MODE: str = "individual"
 
 # ─── Grouped message footer ───────────────────────────────────────────────────
 # Shown at the bottom of every grouped channel post. Edit to match your bot/channel.
