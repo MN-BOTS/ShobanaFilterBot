@@ -16,7 +16,7 @@ logger = logging.getLogger(__name__)
 # ─── Constants ────────────────────────────────────────────────────────────────
 PAGE_SIZE          = 20   # items per page in the daily summary
 SEND_DELAY         = 0.5  # seconds between channel sends (flood-wait safety)
-GETDLINK_PAGE_SIZE = 5    # results per page in /getdlink picker (no hard cap)
+GETDLINK_PAGE_SIZE = 10    # results per page in /getdlink picker (no hard cap)
 
 LANG_MAP = {
     "mal": "Malayalam",
@@ -61,16 +61,18 @@ def normalize_compact_title(title: str) -> str:
     return " ".join(compact)
 
 
-def parse_title_year_and_season(file_name: str) -> tuple[str, str | None, str | None, int | None]:
+def parse_title_year_and_season(
+    file_name: str,
+) -> tuple[str, str | None, str | None, int | None]:
     """
     Returns (clean_title, year | None, season_number | None, episode_number | None).
 
     Handles messy real-world filenames:
       • [PiRO] Blue Lock 23 [][Multiple Subtitle][35 @MNTGX  → "Blue Lock", ep=23
-      • Chained.Soldier.S02E01.Commanders.Meeting.1080p.AM   → "Chained Soldier", season=2, ep=1
-      • [SubsPlease] Demon Slayer S04E05 [1080p]             → "Demon Slayer",    season=4, ep=5
+      • Chained.Soldier.S02E01.Commanders.Meeting.1080p.AM   → "Chained Soldier", s=2, ep=1
+      • [SubsPlease] Demon Slayer S04E05 [1080p]             → "Demon Slayer",    s=4, ep=5
       • Oppenheimer.2023.1080p.BluRay                        → "Oppenheimer",     year=2023
-      • Plaha.S01E10.The.Jackals.1080p.10bit.NF.WEB-DL       → "Plaha",           season=1, ep=10
+      • Plaha.S01E10.The.Jackals.1080p.10bit.NF.WEB-DL       → "Plaha",           s=1, ep=10
     """
     file_name_orig = file_name  # preserve for anime-style detection
 
@@ -89,13 +91,14 @@ def parse_title_year_and_season(file_name: str) -> tuple[str, str | None, str | 
 
     # Step 7: detect year
     year_match = re.search(r"\b((?:19|20)\d{2})\b", clean)
-    # Step 8: detect season AND episode from SxxExx (e.g. S02E05)
-    season_match = re.search(r"\bS(\d{1,2})E(\d{1,3})\b", clean, re.I)
-    ep_from_sxxexx: int | None = int(season_match.group(2)) if season_match else None
+    # Step 8: detect season AND episode — SxxExx gives both
+    sxxexx_match  = re.search(r"\bS(\d{1,2})E(\d{1,3})\b", clean, re.I)
+    season_match  = sxxexx_match
+    ep_from_sxxexx: int | None = int(sxxexx_match.group(2)) if sxxexx_match else None
     if not season_match:
-        season_match = re.search(r"\bS(\d{1,2})(?:\b)", clean, re.I)
-        if not season_match:
-            season_match = re.search(r"\bseason\s*(\d{1,2})\b", clean, re.I)
+        season_match = re.search(r"\bS(\d{1,2})\b", clean, re.I)
+    if not season_match:
+        season_match = re.search(r"\bseason\s*(\d{1,2})\b", clean, re.I)
 
     # Step 9: cut at earliest junk boundary (year or SxxExx marker)
     se_boundary = re.search(r"\bS\d{1,2}(?:E\d+)?\b", clean, re.I)
@@ -124,7 +127,6 @@ def parse_title_year_and_season(file_name: str) -> tuple[str, str | None, str | 
 
     # ── Step 13: anime episode-number strip ──────────────────────────────────
     # Pattern: [Group] Series Name 14 [][Quality] → "Series Name", ep=14
-    # Detect anime-style: original had a leading [Group] tag OR multiple [] blocks
     _is_anime_style = (
         bool(re.match(r"^\s*\[", file_name_orig)) or
         bool(re.search(r"\]\s*\[", file_name_orig))
@@ -138,7 +140,6 @@ def parse_title_year_and_season(file_name: str) -> tuple[str, str | None, str | 
                 anime_ep = int(ep_strip.group(1))
                 title    = prefix
 
-    # Resolve final episode number
     episode_number: int | None = ep_from_sxxexx if ep_from_sxxexx is not None else anime_ep
 
     return (
@@ -167,23 +168,26 @@ def _format_daily_entry(
     year: str | None    = None,
     lang: str | None    = None,
     quality: str | None = None,
-    kind: str | None    = None,   # "movie" / "series" / None
-    episode: int | None = None,   # episode number for series grouping
+    kind: str | None    = None,    # "movie" / "series" / None
+    episode: int | None = None,    # episode number, for series grouping
 ) -> str:
     """
     Produce a /getlist line:
-      🎬 <b>KGF (2022)</b> — Malayalam, Tamil | 720p
-      📺 <b>Blue Lock</b> — Ep 24  (episodes get merged in _build_summary_page)
+      🎬 KGF Chapter 2 (2022) — Malayalam, Tamil | 1080P
+      📺 Blue Lock — Ep 14, 15, 16  (episodes merged in _build_summary_page)
 
-    For series, we embed a hidden metadata marker so the summary builder can
-    group all episodes of the same show:
-      ##SERIES##<series_key>##EP##<ep_num>##DISPLAY##<formatted_line>
+    For series, a hidden metadata prefix is embedded so _build_summary_page can
+    group all episodes of the same show into one line:
+      ##SERIES##<key>##EP##<n>##LANG##<lang>##QUAL##<quality>##TITLE##<display>
     """
-    icon = "📺" if (kind == "series" or re.search(r"\bS\d{2}\b", display_name)) else "🎬"
+    is_series = kind == "series" or re.search(r"\bS\d{2}\b", display_name)
 
-    # --- MOVIE ---
-    if icon == "🎬":
-        name = display_name
+    # Strip S01/S02 suffix to get bare series title
+    base_title = re.sub(r"\s+S\d{2}$", "", display_name, flags=re.I).strip()
+
+    if not is_series:
+        # ── MOVIE ────────────────────────────────────────────────────────────
+        name = base_title
         if year and str(year) not in name:
             name = f"{name} ({year})"
         extras: list[str] = []
@@ -196,25 +200,19 @@ def _format_daily_entry(
             line += f" — {' | '.join(extras)}"
         return line
 
-    # --- SERIES ---
-    # Strip S01/S02 suffix from display_name to get base series title for grouping
-    series_key = re.sub(r"\s+S\d{2}$", "", display_name, flags=re.I).strip().lower()
-    series_display = re.sub(r"\s+S\d{2}$", "", display_name, flags=re.I).strip()
-
-    ep_num = episode if episode is not None else 0
-
-    extras2: list[str] = []
-    if lang:
-        extras2.append(lang)
-    if quality:
-        extras2.append(quality)
-
-    visible_line = f"📺 <b>{_esc(series_display)}</b>"
-    if extras2:
-        visible_line += f" — {' | '.join(extras2)}"
-
-    # Embed metadata for grouping — stripped out before display
-    return f"##SERIES##{series_key}##EP##{ep_num}##DISPLAY##{visible_line}"
+    # ── SERIES ───────────────────────────────────────────────────────────────
+    # Embed structured metadata so _build_summary_page can group episodes
+    series_key = re.sub(r"[^a-z0-9 ]", "", base_title.lower()).strip()
+    ep_num     = episode if episode is not None else 0
+    lang_val   = lang    or ""
+    qual_val   = quality or ""
+    return (
+        f"##SERIES##{series_key}"
+        f"##EP##{ep_num}"
+        f"##LANG##{lang_val}"
+        f"##QUAL##{qual_val}"
+        f"##TITLE##{_esc(base_title)}"
+    )
 
 
 def _esc(val) -> str:
@@ -749,6 +747,59 @@ async def getlist_cmd(bot: Client, message) -> None:
 #  PAGINATED DAILY SUMMARY  (20 items / page  •  Prev / Next buttons)
 # ══════════════════════════════════════════════════════════════════════════════
 
+def _parse_raw_entry(raw: str) -> str:
+    """
+    Convert any raw/legacy stored string into a clean formatted line.
+    Handles:
+      • New metadata:  ##SERIES##...
+      • Old formatted: 🎬 / 📺 already HTML
+      • Raw filenames: [PiRO] Blue Lock 14 [][...] @MNTGX   → 📺 Blue Lock — Ep 14
+                       KGF Chapter 2 2022 mal tam 1080p      → 🎬 KGF Chapter 2 (2022) — Malayalam, Tamil | 1080P
+    """
+    # Already-formatted HTML emoji lines — return as-is
+    if raw.startswith(("🎬", "📺")):
+        return raw
+
+    # New metadata lines — caller handles these separately for grouping
+    if raw.startswith("##SERIES##"):
+        return raw  # pass through; grouped by _build_summary_page
+
+    # ── Raw/legacy filename → parse on the fly ────────────────────────────
+    title, year, season, episode = parse_title_year_and_season(raw)
+    lang    = detect_language(raw)
+    quality = extract_quality(raw)
+
+    # Decide movie vs series:
+    # series if has SxxExx, or has leading [Group] tag / multiple [] blocks (anime), or explicit season
+    is_anime = bool(re.match(r"^\s*\[", raw)) or bool(re.search(r"\]\s*\[", raw))
+    is_series = bool(season) or is_anime
+
+    if is_series:
+        # Return metadata string so caller can group episodes
+        series_key = re.sub(r"[^a-z0-9 ]", "", title.lower()).strip()
+        ep_num     = episode if episode is not None else 0
+        return (
+            f"##SERIES##{series_key}"
+            f"##EP##{ep_num}"
+            f"##LANG##{lang or ''}"
+            f"##QUAL##{quality or ''}"
+            f"##TITLE##{_esc(title)}"
+        )
+    else:
+        name = title
+        if year and str(year) not in name:
+            name = f"{name} ({year})"
+        extras: list[str] = []
+        if lang:
+            extras.append(lang)
+        if quality:
+            extras.append(quality)
+        line = f"🎬 <b>{_esc(name)}</b>"
+        if extras:
+            line += f" — {' | '.join(extras)}"
+        return line
+
+
 def _build_summary_page(
     items: list[str],
     page: int,
@@ -763,70 +814,72 @@ def _build_summary_page(
         f"<i>Page {page + 1}/{total_pages}  •  {len(items)} total</i>\n\n"
     )
 
-    # ── Decode and group items ────────────────────────────────────────────────
-    # Pass 1: parse every item in the full chunk
-    # Series items carry metadata: ##SERIES##<key>##EP##<n>##DISPLAY##<html>
-    # We collect all episodes per series key, then emit one merged line.
+    # ── Pass 1: normalise every item (raw filenames → metadata or formatted) ─
+    normalised = [_parse_raw_entry(x) for x in chunk]
 
-    # We maintain insertion order using a list of keys + a dict for data
-    seen_series_keys: list[str] = []
-    series_data: dict[str, dict] = {}  # key → {display_line, episodes: set}
-    body_lines: list[str] = []
+    # ── Pass 2: build body, grouping series episodes ──────────────────────────
+    # Use a list for insertion-order and a dict for per-series state.
+    # Non-series lines are appended directly; first occurrence of a series key
+    # inserts a placeholder; subsequent occurrences just add their episode number.
 
-    for x in chunk:
-        if x.startswith("##SERIES##"):
-            # Parse metadata
+    body_lines: list[str | None] = []   # None = placeholder for a series slot
+    series_slots: dict[str, dict] = {}  # key → {slot_index, lang, qual, title, episodes}
+
+    for item in normalised:
+        if item.startswith("##SERIES##"):
             try:
-                _, rest = x.split("##SERIES##", 1)
-                key_part, rest2  = rest.split("##EP##", 1)
-                ep_part, display = rest2.split("##DISPLAY##", 1)
-                series_key = key_part.strip()
-                ep_num     = int(ep_part.strip())
+                rest        = item[len("##SERIES##"):]
+                key,  rest  = rest.split("##EP##",    1)
+                ep,   rest  = rest.split("##LANG##",  1)
+                lang, rest  = rest.split("##QUAL##",  1)
+                qual, title = rest.split("##TITLE##", 1)
+                key   = key.strip()
+                ep    = int(ep.strip())
+                lang  = lang.strip()
+                qual  = qual.strip()
+                title = title.strip()
             except (ValueError, AttributeError):
-                # Malformed — treat as plain
-                body_lines.append(f"• {_esc(x)}")
+                body_lines.append(f"• {_esc(item)}")
                 continue
 
-            if series_key not in series_data:
-                seen_series_keys.append(series_key)
-                series_data[series_key] = {
-                    "display": display,
+            if key not in series_slots:
+                series_slots[key] = {
+                    "slot":     len(body_lines),
+                    "lang":     lang,
+                    "qual":     qual,
+                    "title":    title,
                     "episodes": set(),
-                    # placeholder index so it appears in the right position
-                    "body_index": len(body_lines),
                 }
-                body_lines.append(None)  # placeholder, filled at render time
-            if ep_num > 0:
-                series_data[series_key]["episodes"].add(ep_num)
+                body_lines.append(None)          # placeholder
+            if ep > 0:
+                series_slots[key]["episodes"].add(ep)
 
-        elif x.startswith(("🎬", "📺")):
-            body_lines.append(x)
+        elif item.startswith(("🎬", "📺")):
+            body_lines.append(item)
         else:
-            body_lines.append(f"• {_esc(x)}")
+            body_lines.append(f"• {_esc(item)}")
 
-    # Pass 2: fill placeholders with merged series lines
-    for key in seen_series_keys:
-        data  = series_data[key]
-        idx   = data["body_index"]
-        base  = data["display"]          # e.g. 📺 <b>Blue Lock</b> — Multi Sub
+    # ── Pass 3: fill series placeholders ─────────────────────────────────────
+    for data in series_slots.values():
         eps   = sorted(data["episodes"])
+        title = data["title"]
+        lang  = data["lang"]
+        qual  = data["qual"]
 
+        line = f"📺 <b>{title}</b>"
+        parts: list[str] = []
         if eps:
-            ep_str = ", ".join(str(e) for e in eps)
-            # Append episode list to the line
-            if " — " in base:
-                # Insert episode info before the " — extras" part
-                title_part, extras_part = base.split(" — ", 1)
-                merged = f"{title_part} — Ep {ep_str} | {extras_part}"
-            else:
-                merged = f"{base} — Ep {ep_str}"
-        else:
-            merged = base
+            parts.append(f"Ep {', '.join(str(e) for e in eps)}")
+        if lang:
+            parts.append(lang)
+        if qual:
+            parts.append(qual)
+        if parts:
+            line += f" — {' | '.join(parts)}"
 
-        body_lines[idx] = merged
+        body_lines[data["slot"]] = line
 
-    # Filter out any remaining None placeholders (shouldn't happen)
-    body = "\n".join(line for line in body_lines if line is not None)
+    body = "\n".join(ln for ln in body_lines if ln is not None)
     text = header + body
 
     nav: list[InlineKeyboardButton] = []
