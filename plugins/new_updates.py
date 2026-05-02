@@ -17,6 +17,16 @@ logger = logging.getLogger(__name__)
 PAGE_SIZE          = 20   # items per page in the daily summary
 SEND_DELAY         = 0.5  # seconds between channel sends (flood-wait safety)
 GETDLINK_PAGE_SIZE = 10    # results per page in /getdlink picker (no hard cap)
+GROUP_SIZE         = 25   # number of titles per grouped channel message
+
+# ─── Channel send mode ────────────────────────────────────────────────────────
+# "individual" → send each movie/series as its own message (with IMDb card + button)
+# "grouped"    → accumulate titles and send a plain list of 25 in one message (no callbacks)
+CHANNEL_SEND_MODE: str = "grouped"
+
+# ─── Grouped message footer ───────────────────────────────────────────────────
+# Shown at the bottom of every grouped channel post. Edit to match your bot/channel.
+GROUP_SEARCH_TEXT: str = "🔍 Search movies → @malayalam_2022"
 
 LANG_MAP = {
     "mal": "Malayalam",
@@ -30,6 +40,10 @@ LANG_MAP = {
 # ─── Serial queue – guarantees zero skips during bulk indexing ────────────────
 _update_queue: asyncio.Queue  = asyncio.Queue()
 _queue_consumer_started: bool = False
+
+# ─── Pending group buffer (used only when CHANNEL_SEND_MODE == "grouped") ─────
+# Accumulates formatted list_entry strings; flushed every GROUP_SIZE items.
+_pending_group: list[str] = []
 
 # ─── Per-admin session state for /getdlink flow ───────────────────────────────
 # Structure: { user_id: { "results": [...], "query": str, "page": int } }
@@ -315,6 +329,109 @@ async def _build_update_message(
     return text, markup
 
 
+def _resolve_group_entry(entry: str) -> tuple[str, str, str, str]:
+    """
+    Parse any entry format → (emoji, title, lang, qual).
+    Handles ##SERIES## metadata, already-formatted 🎬/📺 lines, and raw names.
+    """
+    if entry.startswith("##SERIES##"):
+        try:
+            rest         = entry[len("##SERIES##"):]
+            _key,  rest  = rest.split("##EP##",    1)
+            _ep,   rest  = rest.split("##LANG##",  1)
+            lang,  rest  = rest.split("##QUAL##",  1)
+            qual,  title = rest.split("##TITLE##", 1)
+            return "📺", title.strip(), lang.strip(), qual.strip()
+        except (ValueError, AttributeError):
+            pass
+
+    # Already-formatted line: strip emoji prefix for clean re-render
+    for emoji in ("🎬", "📺"):
+        if entry.startswith(emoji):
+            # e.g. "🎬 <b>KGF Chapter 2 (2022)</b> — Malayalam | 1080P"
+            # Just return the whole line as title; no extras to split cleanly
+            return emoji, entry[2:].strip(), "", ""
+
+    return "🎬", entry.strip(), "", ""
+
+
+async def _flush_group_to_channels(bot: Client, entries: list[str]) -> None:
+    """
+    Send a beautifully formatted numbered list of up to GROUP_SIZE titles
+    to every update channel. No inline keyboard, no callbacks.
+
+    Layout:
+    ╔══════════════════════════════╗
+       🎬 New Additions  [date]
+       25 movies & series
+    ══════════════════════════════
+     1. 🎬 KGF Chapter 2 (2022)
+           Malayalam | 1080P
+     2. 📺 Blue Lock
+    ...
+    ══════════════════════════════
+       🔍 Search movies → @bot
+    ╚══════════════════════════════╝
+    """
+    if not entries:
+        return
+
+    channel_ids = await db.get_update_chat_ids()
+    now         = datetime.now(timezone.utc)
+    today       = now.strftime("%d %b %Y")          # e.g. "02 May 2026"
+
+    # Count movies vs series for the subtitle
+    movies  = sum(1 for e in entries if not e.startswith("##SERIES##") and not e.startswith("📺"))
+    series  = len(entries) - movies
+    if movies and series:
+        subtitle = f"<i>{movies} movie{'s' if movies > 1 else ''} · {series} series</i>"
+    elif movies:
+        subtitle = f"<i>{movies} movie{'s' if movies > 1 else ''}</i>"
+    else:
+        subtitle = f"<i>{series} series</i>"
+
+    divider = "─" * 28
+
+    lines: list[str] = [
+        f"<b>🎬  New Additions</b>  <code>[{today}]</code>",
+        subtitle,
+        f"<code>{divider}</code>",
+        "",
+    ]
+
+    for i, entry in enumerate(entries, 1):
+        emoji, title, lang, qual = _resolve_group_entry(entry)
+
+        # Build extras tag line (lang / quality)
+        extras_parts: list[str] = []
+        if lang:
+            extras_parts.append(lang)
+        if qual:
+            extras_parts.append(qual)
+        extras = "  <i>" + " · ".join(extras_parts) + "</i>" if extras_parts else ""
+
+        index_str = f"{i:>2}."
+        lines.append(f"<code>{index_str}</code> {emoji} {title}{extras}")
+
+    lines += [
+        "",
+        f"<code>{divider}</code>",
+        f"<b>{GROUP_SEARCH_TEXT}</b>",
+    ]
+
+    text = "\n".join(lines)
+
+    for cid in channel_ids:
+        try:
+            await bot.send_message(
+                cid, text,
+                parse_mode=ParseMode.HTML,
+                disable_web_page_preview=True,
+            )
+        except Exception as exc:
+            logger.warning("Failed sending group update to channel %s: %s", cid, exc)
+
+
 async def _send_to_channels(
     bot: Client,
     text: str,
@@ -323,25 +440,50 @@ async def _send_to_channels(
     imdb_key: str,                   # dedup key
     list_entry: str | None = None,   # pre-formatted /getlist line
 ) -> int:
-    """Send text+markup to all update channels. Returns count of successful sends."""
-    channel_ids = await db.get_update_chat_ids()
-    sent = 0
-    for cid in channel_ids:
-        try:
-            await bot.send_message(
-                cid, text,
-                disable_web_page_preview=True,
-                reply_markup=markup
-            )
-            sent += 1
-        except Exception as exc:
-            logger.warning("Failed sending update to channel %s: %s", cid, exc)
-    if sent:
-        await db.add_announced_key(imdb_key)
-        # Store the rich formatted entry for /getlist; fall back to plain name
-        await db.add_daily_added(list_entry or display_name)
-        logger.info("✅ Announced: %s", display_name)
-    return sent
+    """
+    Route to the correct send strategy based on CHANNEL_SEND_MODE.
+
+    • "individual" — send each title as its own IMDb card message (original behaviour).
+    • "grouped"    — accumulate entries in _pending_group; flush as a plain numbered
+                     list to channels every GROUP_SIZE items (no callbacks).
+
+    Returns 1 when the item was accepted/recorded, 0 on dedup skip.
+    """
+    global _pending_group
+
+    # ── Always record the announced key and daily-added entry first ───────────
+    await db.add_announced_key(imdb_key)
+    await db.add_daily_added(list_entry or display_name)
+    logger.info("✅ Recorded: %s", display_name)
+
+    if CHANNEL_SEND_MODE == "individual":
+        # ── Original behaviour: one IMDb card per title ───────────────────────
+        channel_ids = await db.get_update_chat_ids()
+        sent = 0
+        for cid in channel_ids:
+            try:
+                await bot.send_message(
+                    cid, text,
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                    reply_markup=markup,
+                )
+                sent += 1
+            except Exception as exc:
+                logger.warning("Failed sending update to channel %s: %s", cid, exc)
+        return sent
+
+    else:
+        # ── Grouped mode: accumulate and flush every GROUP_SIZE items ─────────
+        _pending_group.append(list_entry or display_name)
+        logger.debug("Group buffer: %d/%d", len(_pending_group), GROUP_SIZE)
+
+        if len(_pending_group) >= GROUP_SIZE:
+            batch          = _pending_group[:GROUP_SIZE]
+            _pending_group = _pending_group[GROUP_SIZE:]
+            await _flush_group_to_channels(bot, batch)
+
+        return 1
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -932,6 +1074,14 @@ async def _send_paginated_summary(bot: Client, cid: int, items: list[str]) -> No
 # ══════════════════════════════════════════════════════════════════════════════
 
 async def run_daily_summary(bot: Client) -> None:
+    """
+    Background task that runs forever.
+
+    • In "individual" mode  → sends the paginated /getlist summary to channels
+      at 23:55 UTC (original nightly-summary behaviour).
+    • In "grouped" mode     → flushes any leftover titles that did not fill a
+      full GROUP_SIZE batch, once per day at 23:55 UTC, so nothing is lost.
+    """
     last_summary_date: str | None = None
 
     while True:
@@ -940,9 +1090,22 @@ async def run_daily_summary(bot: Client) -> None:
 
         if now.hour == 23 and now.minute >= 55:
             if last_summary_date != today and not await db.is_daily_summary_done(today):
-                items = await db.get_daily_added()
-                for cid in await db.get_update_chat_ids():
-                    await _send_paginated_summary(bot, cid, items)
+
+                if CHANNEL_SEND_MODE == "individual":
+                    # Original: send paginated summary to channels
+                    items = await db.get_daily_added()
+                    for cid in await db.get_update_chat_ids():
+                        await _send_paginated_summary(bot, cid, items)
+
+                else:
+                    # Grouped: flush any partial batch that never hit GROUP_SIZE
+                    global _pending_group
+                    if _pending_group:
+                        leftover       = _pending_group[:]
+                        _pending_group = []
+                        await _flush_group_to_channels(bot, leftover)
+                        logger.info("Flushed %d leftover grouped entries at end of day.", len(leftover))
+
                 await db.mark_daily_summary_done(today)
                 await db.clear_daily_added()
                 last_summary_date = today
