@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from database.users_chats_db import db
@@ -707,7 +708,7 @@ async def getlist_cmd(bot: Client, message) -> None:
     total_pages  = max(1, -(-len(items) // PAGE_SIZE))
     today        = datetime.now(timezone.utc).date().isoformat()
     text, markup = _build_summary_page(items, 0, total_pages, today)
-    await message.reply(text, parse_mode="html", reply_markup=markup)
+    await message.reply(text, parse_mode=ParseMode.HTML, reply_markup=markup)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -764,7 +765,7 @@ async def summary_page_callback(bot: Client, query) -> None:
     text, markup = _build_summary_page(items, page, total_pages, today)
 
     try:
-        await query.edit_message_text(text, parse_mode="html", reply_markup=markup)
+        await query.edit_message_text(text, parse_mode=ParseMode.HTML, reply_markup=markup)
     except Exception as exc:
         logger.warning("Failed editing summary page: %s", exc)
 
@@ -778,7 +779,7 @@ async def _send_paginated_summary(bot: Client, cid: int, items: list[str]) -> No
     today        = datetime.now(timezone.utc).date().isoformat()
     text, markup = _build_summary_page(items, 0, total_pages, today)
     try:
-        await bot.send_message(cid, text, parse_mode="html", reply_markup=markup)
+        await bot.send_message(cid, text, parse_mode=ParseMode.HTML, reply_markup=markup)
     except Exception as exc:
         logger.warning("Failed sending summary to %s: %s", cid, exc)
 
