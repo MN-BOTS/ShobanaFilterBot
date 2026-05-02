@@ -11,6 +11,7 @@ from database.users_chats_db import db
 from info import CHANNELS, ADMINS, LOG_CHANNEL, PICS, BATCH_FILE_CAPTION, CUSTOM_FILE_CAPTION, PROTECT_CONTENT, FILE_CHANNELS, FILE_CHANNEL_SENDING_MODE, FILE_AUTO_DELETE_SECONDS
 from utils import get_settings, get_size, is_subscribed, save_group_settings, temp, create_invite_links
 from database.connections_mdb import active_connection
+from plugins.pm_filter import auto_filter
 import re
 import json
 from pyrogram.types import Message
@@ -214,6 +215,20 @@ async def start(client, message):
             parse_mode=enums.ParseMode.HTML
         )
         return
+    if len(message.command) == 2 and message.command[1].startswith('mntgx'):
+        payload = message.command[1]
+        if '_' in payload:
+            searches = payload.split('_', 1)[1]
+        elif '-' in payload:
+            searches = payload.split('-', 1)[1]
+        else:
+            searches = ''
+        search = searches.replace('-', ' ').replace('_', ' ').strip()
+        if search:
+            message.text = search
+            await auto_filter(client, message)
+        return
+
     if not await is_subscribed(message.from_user.id, client):
         links = await create_invite_links(client)
         btn = [[InlineKeyboardButton("🤖 Join Updates Channel", url=url)] for url in links.values()]
@@ -254,12 +269,6 @@ async def start(client, message):
         )
         return
     
-    if len(message.command) == 2 and message.command[1].startswith('mntgx'):
-        searches = message.command[1].split("-", 1)[1] 
-        search = searches.replace('-',' ')
-        message.text = search 
-        await auto_filter(client, message) 
-        return
     data = message.command[1]
     try:
         pre, file_id = data.split('_', 1)

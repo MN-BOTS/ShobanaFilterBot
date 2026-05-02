@@ -35,6 +35,7 @@ pyroutils.MIN_CHAT_ID = -999999999999
 pyroutils.MIN_CHANNEL_ID = -100999999999999
 
 from plugins.webcode import bot_run
+from plugins.new_updates import run_daily_summary
 
 PORT_CODE = environ.get("PORT", "8080")
 
@@ -106,6 +107,7 @@ class Bot(Client):
 
         asyncio.create_task(self.kulasthree())
         asyncio.create_task(keep_alive())
+        asyncio.create_task(run_daily_summary(self))
 
         client = webserver.AppRunner(await bot_run())
         await client.setup()
