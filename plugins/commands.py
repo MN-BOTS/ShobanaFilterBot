@@ -74,7 +74,7 @@ async def auto_delete_file(client, message, delay):
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
 
-async def send_file_to_user(client, user_id, file_id, protect_content_flag, file_name=None, file_size=None, file_caption=None):
+async def send_file_to_user(client, user_id, file_id, protect_content_flag, file_name=None, file_size=None, file_caption=None, requester_mention=None):
     try:
         # Generate proper caption
         caption = None
@@ -90,6 +90,10 @@ async def send_file_to_user(client, user_id, file_id, protect_content_flag, file
                 caption = file_caption if file_caption else file_name
         else:
             caption = file_caption if file_caption else file_name
+
+        if requester_mention:
+            mention_line = f"Requested by: {requester_mention}"
+            caption = f"{mention_line}\n\n{caption}" if caption else mention_line
 
         # File sending logic with channel support
         if FILE_CHANNEL_SENDING_MODE and FILE_CHANNELS:
@@ -155,7 +159,8 @@ async def checksub_callback(client, callback_query):
                 protect_content_flag=protect_content_flag,
                 file_name=file_details.file_name if file_details else None,
                 file_size=get_size(file_details.file_size) if file_details else None,
-                file_caption=file_details.caption if file_details else None
+                file_caption=file_details.caption if file_details else None,
+                requester_mention=callback_query.from_user.mention if callback_query.from_user else None
             )
             await callback_query.message.delete()
         except Exception as e:
