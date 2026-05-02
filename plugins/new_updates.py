@@ -146,6 +146,43 @@ def detect_language(file_name: str) -> str | None:
     return ", ".join(found) if found else None
 
 
+def extract_quality(file_name: str) -> str | None:
+    """Extract the best available quality tag from a raw filename."""
+    m = re.search(r"\b(2160p|4K|1080p|720p|480p|HQ|HD)\b", file_name, re.I)
+    return m.group(1).upper() if m else None
+
+
+def _format_daily_entry(
+    display_name: str,
+    *,
+    year: str | None    = None,
+    lang: str | None    = None,
+    quality: str | None = None,
+    kind: str | None    = None,   # "movie" / "series" / None
+) -> str:
+    """
+    Produce a /getlist line in the same style as /movies and /series:
+      🎬 <b>Title (2024)</b> - Malayalam | 1080p
+      📺 <b>Blue Lock S01</b> - Multiple Subtitle | 720p
+    """
+    icon = "📺" if (kind == "series" or re.search(r"\bS\d{2}\b", display_name)) else "🎬"
+    # Append year in parentheses if not already present and it's a movie
+    name = display_name
+    if year and icon == "🎬" and str(year) not in name:
+        name = f"{name} ({year})"
+
+    extras: list[str] = []
+    if lang:
+        extras.append(lang)
+    if quality:
+        extras.append(quality)
+
+    line = f"{icon} <b>{_esc(name)}</b>"
+    if extras:
+        line += f" — {' | '.join(extras)}"
+    return line
+
+
 def _esc(val) -> str:
     """HTML-escape for Telegram parse_mode='HTML'. Returns empty string for None."""
     if val is None:
@@ -251,7 +288,8 @@ async def _send_to_channels(
     text: str,
     markup: InlineKeyboardMarkup,
     display_name: str,
-    imdb_key: str,          # dedup key
+    imdb_key: str,                   # dedup key
+    list_entry: str | None = None,   # pre-formatted /getlist line
 ) -> int:
     """Send text+markup to all update channels. Returns count of successful sends."""
     channel_ids = await db.get_update_chat_ids()
@@ -268,7 +306,8 @@ async def _send_to_channels(
             logger.warning("Failed sending update to channel %s: %s", cid, exc)
     if sent:
         await db.add_announced_key(imdb_key)
-        await db.add_daily_added(display_name)
+        # Store the rich formatted entry for /getlist; fall back to plain name
+        await db.add_daily_added(list_entry or display_name)
         logger.info("✅ Announced: %s", display_name)
     return sent
 
@@ -327,13 +366,21 @@ async def _process_one_update(bot: Client, file_name: str) -> None:
         )
         return
 
-    lang = detect_language(file_name)
+    lang    = detect_language(file_name)
+    quality = extract_quality(file_name)
     text, markup = await _build_update_message(bot, imdb, season=season, lang=lang)
 
     base_name    = imdb.get("title") or title
     display_name = f"{base_name} S{int(season):02d}" if season else base_name
+    list_entry   = _format_daily_entry(
+        display_name,
+        year    = imdb.get("year") or year,
+        lang    = lang,
+        quality = quality,
+        kind    = "series" if season else imdb.get("kind"),
+    )
 
-    await _send_to_channels(bot, text, markup, display_name, key)
+    await _send_to_channels(bot, text, markup, display_name, key, list_entry=list_entry)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -615,7 +662,12 @@ async def getdlink_confirm_callback(bot: Client, query) -> None:
         return
 
     _, clean_markup = await _build_update_message(bot, imdb, season=season, lang=None)
-    sent = await _send_to_channels(bot, preview_text, clean_markup, display_name, imdb_key)
+    list_entry = _format_daily_entry(
+        display_name,
+        year = str(imdb.get("year")) if imdb.get("year") else None,
+        kind = "series" if season else imdb.get("kind"),
+    )
+    sent = await _send_to_channels(bot, preview_text, clean_markup, display_name, imdb_key, list_entry=list_entry)
 
     if sent:
         await query.edit_message_text(
@@ -655,7 +707,7 @@ async def getlist_cmd(bot: Client, message) -> None:
     total_pages  = max(1, -(-len(items) // PAGE_SIZE))
     today        = datetime.now(timezone.utc).date().isoformat()
     text, markup = _build_summary_page(items, 0, total_pages, today)
-    await message.reply(text, reply_markup=markup)
+    await message.reply(text, parse_mode="html", reply_markup=markup)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -675,7 +727,15 @@ def _build_summary_page(
         f"<b>📋 Today's Added Movies/Series</b>  [{today}]\n"
         f"<i>Page {page + 1}/{total_pages}  •  {len(items)} total</i>\n\n"
     )
-    body = "\n".join(f"• {_esc(x)}" for x in chunk)
+    # Items are already HTML-formatted by _format_daily_entry (✅ <b>Title</b> — lang | quality)
+    # Raw strings from legacy entries are escaped and prefixed with a bullet as fallback
+    body_lines: list[str] = []
+    for x in chunk:
+        if x.startswith(("🎬", "📺")):
+            body_lines.append(x)          # already formatted HTML — use as-is
+        else:
+            body_lines.append(f"• {_esc(x)}")   # legacy plain string fallback
+    body = "\n".join(body_lines)
     text = header + body
 
     nav: list[InlineKeyboardButton] = []
@@ -704,7 +764,7 @@ async def summary_page_callback(bot: Client, query) -> None:
     text, markup = _build_summary_page(items, page, total_pages, today)
 
     try:
-        await query.edit_message_text(text, reply_markup=markup)
+        await query.edit_message_text(text, parse_mode="html", reply_markup=markup)
     except Exception as exc:
         logger.warning("Failed editing summary page: %s", exc)
 
@@ -718,7 +778,7 @@ async def _send_paginated_summary(bot: Client, cid: int, items: list[str]) -> No
     today        = datetime.now(timezone.utc).date().isoformat()
     text, markup = _build_summary_page(items, 0, total_pages, today)
     try:
-        await bot.send_message(cid, text, reply_markup=markup)
+        await bot.send_message(cid, text, parse_mode="html", reply_markup=markup)
     except Exception as exc:
         logger.warning("Failed sending summary to %s: %s", cid, exc)
 
