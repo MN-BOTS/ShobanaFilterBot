@@ -63,7 +63,8 @@ Each help page contains a short list for easy reading.
 • /leave - Leave a chat
 • /disable - Disable a chat
 • /enable - Enable a chat
-• /deletefiles & /deleteall - Bulk file delete""",
+• /deletefiles & /deleteall - Bulk file delete
+• Channel send mode + auto-delete file delivery""",
 """<b>📘 Help (6/6): Owner/Admin-Only</b>
 • /users - List bot users
 • /chats - List connected chats
@@ -74,7 +75,8 @@ Each help page contains a short list for easy reading.
 • /delete - Delete one indexed file
 • /fsub - Update force-sub channels
 • /restart, /ping, /usage - System tools
-• /set_template, /setskip, /clear_join_users"""
+• /set_template, /setskip, /clear_join_users
+• Bot commands auto-sync on startup"""
     ]
     ABOUT_TXT = """<b>
 ◎ Cʀᴇᴀᴛᴏʀ: <a href=https://github.com/mntgxo> MN - TG</a>
