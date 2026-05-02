@@ -13,9 +13,9 @@ from utils import get_poster
 logger = logging.getLogger(__name__)
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-PAGE_SIZE        = 20    # items per page in the daily summary
-SEND_DELAY       = 0.5   # seconds between channel sends (flood-wait safety)
-MAX_SEARCH_RESULTS = 5   # max IMDb results shown in /getdlink picker
+PAGE_SIZE          = 20   # items per page in the daily summary
+SEND_DELAY         = 0.5  # seconds between channel sends (flood-wait safety)
+GETDLINK_PAGE_SIZE = 5    # results per page in /getdlink picker (no hard cap)
 
 LANG_MAP = {
     "mal": "Malayalam",
@@ -31,7 +31,7 @@ _update_queue: asyncio.Queue  = asyncio.Queue()
 _queue_consumer_started: bool = False
 
 # ─── Per-admin session state for /getdlink flow ───────────────────────────────
-# Structure: { user_id: { "results": [imdb_dict, ...], "query": str } }
+# Structure: { user_id: { "results": [...], "query": str, "page": int } }
 _getdlink_sessions: dict[int, dict] = {}
 
 
@@ -65,11 +65,14 @@ def parse_title_year_and_season(file_name: str) -> tuple[str, str | None, str | 
     Returns (clean_title, year | None, season_number | None).
 
     Handles messy real-world filenames:
-      • [PiRO] Blue Lock 23 [][Multiple Subtitle][35 @MNTGX  → "Blue Lock 23"
+      • [PiRO] Blue Lock 23 [][Multiple Subtitle][35 @MNTGX  → "Blue Lock", no season
       • Chained.Soldier.S02E01.Commanders.Meeting.1080p.AM   → "Chained Soldier", season=2
       • [SubsPlease] Demon Slayer S04E05 [1080p]             → "Demon Slayer",    season=4
       • Oppenheimer.2023.1080p.BluRay                        → "Oppenheimer",     year=2023
+      • Plaha.S01E10.The.Jackals.1080p.10bit.NF.WEB-DL       → "Plaha",           season=1
     """
+    file_name_orig = file_name  # preserve for anime-style detection
+
     # Step 1: strip file extension
     file_name = re.sub(r"\.[a-zA-Z0-9]{2,4}$", "", file_name)
     # Step 2: strip leading release-group tag [PiRO] / (HorribleSubs)
@@ -103,7 +106,8 @@ def parse_title_year_and_season(file_name: str) -> tuple[str, str | None, str | 
     title = re.sub(
         r"\b(2160p|1080p|720p|480p|x264|x265|h264|h265|hevc|webrip|hdrip|"
         r"web[-\s]?dl|blu[-\s]?ray|aac|ac3|dts|esub|mkv|mp4|avi|hdtv|hq|"
-        r"dvdrip|bdrip|nf|amzn|hmax|proper|repack|multi|dual|subbed|dubbed)\b",
+        r"dvdrip|bdrip|nf|amzn|hmax|proper|repack|multi|dual|subbed|dubbed|"
+        r"10bit|8bit|ddp\d?[\.\d]*|dts[\-\w]*|hdr|sdr|atmos)\b",
         "", title, flags=re.I
     ).strip()
     # Step 11: residual season/ep tokens
@@ -113,6 +117,21 @@ def parse_title_year_and_season(file_name: str) -> tuple[str, str | None, str | 
     ).strip()
     # Step 12: normalise whitespace + acronym-join
     title = normalize_compact_title(re.sub(r"\s+", " ", title)).strip()
+
+    # ── Step 13: anime episode-number strip ──────────────────────────────────
+    # Pattern: [Group] Series Name 14 [][Quality] → "Series Name"
+    # Detect anime-style: original had a leading [Group] tag OR multiple [] blocks
+    _is_anime_style = (
+        bool(re.match(r"^\s*\[", file_name_orig)) or
+        bool(re.search(r"\]\s*\[", file_name_orig))
+    )
+    if _is_anime_style and not season_match:
+        # Strip trailing standalone 1-4 digit number (episode number)
+        ep_strip = re.search(r"\s+(\d{1,4})\s*$", title)
+        if ep_strip:
+            prefix = title[:ep_strip.start()].strip()
+            if prefix:  # don't strip if nothing would remain
+                title = prefix
 
     return (
         title or clean.strip(),
@@ -142,6 +161,27 @@ def _make_key(title: str, year: str | None, season: str | None) -> str:
     """S01 and S02 → different keys. Same season → duplicate → skip."""
     base = f"{title.strip().lower()}::{year or 'na'}"
     return f"{base}::s{int(season):02d}" if season else f"{base}::movie"
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+#  IMDb MATCH CONFIDENCE  (prevents wrong-title announcements)
+# ══════════════════════════════════════════════════════════════════════════════
+
+def _title_confidence(parsed: str, imdb_title: str) -> float:
+    """
+    0.0–1.0: word-overlap score between the parsed title and the IMDb result.
+    Short titles (≤2 words) use a higher bar via exact-prefix check.
+    """
+    p_words = set(re.sub(r"[^a-z0-9 ]", "", parsed.lower()).split())
+    i_words = set(re.sub(r"[^a-z0-9 ]", "", imdb_title.lower()).split())
+    # Remove very common stop-words that inflate false confidence
+    stops = {"the", "a", "an", "of", "in", "and", "to", "is"}
+    p_words -= stops
+    i_words -= stops
+    if not p_words or not i_words:
+        return 0.0
+    overlap = len(p_words & i_words)
+    return overlap / max(len(p_words), len(i_words))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -186,8 +226,12 @@ async def _build_update_message(
         rating_parts.append(f"🎭 {_esc(imdb['kind'])}")
     if rating_parts:
         lines.append(f"• <b>IMDb:</b> {' | '.join(rating_parts)}")
+
+    # ── "More" as a clickable hyperlink instead of a raw URL ─────────────────
     if imdb.get("url"):
-        lines.append(f"• <b>More:</b> {imdb['url']}")
+        lines.append(
+            f'• <b>More:</b> <a href="{imdb["url"]}">🔗 Click here</a>'
+        )
 
     text = "\n".join(lines)
 
@@ -246,14 +290,21 @@ async def _queue_consumer(bot: Client) -> None:
 
 
 async def _process_one_update(bot: Client, file_name: str) -> None:
-    """Parse → dedup → IMDb → format → send → record."""
+    """Parse → dedup → IMDb → confidence check → format → send → record."""
     title, year, season = parse_title_year_and_season(file_name)
+
+    # Skip suspiciously short titles (likely parsing failure)
+    if len(title) < 2:
+        logger.debug("Title too short after parsing, skipping: '%s'", file_name)
+        return
+
     key = _make_key(title, year, season)
 
     if await db.check_announced_key(key):
         logger.debug("Duplicate, skipping: %s", key)
         return
 
+    # ── IMDb search with year-stripped fallback ───────────────────────────────
     imdb = await get_poster(title, file=file_name)
     if not imdb:
         fallback = re.sub(r"\b(?:19|20)\d{2}\b", "", title).strip()
@@ -264,6 +315,16 @@ async def _process_one_update(bot: Client, file_name: str) -> None:
 
     if not imdb:
         logger.info("No IMDb data for '%s' (parsed: '%s') — skipping.", file_name, title)
+        return
+
+    # ── Confidence gate: reject obviously-wrong IMDb matches ─────────────────
+    imdb_title = imdb.get("title", "")
+    confidence = _title_confidence(title, imdb_title)
+    if confidence < 0.25:
+        logger.info(
+            "Low-confidence IMDb match (%.0f%%) '%s' → '%s' — skipping.",
+            confidence * 100, title, imdb_title,
+        )
         return
 
     lang = detect_language(file_name)
@@ -293,12 +354,49 @@ async def post_new_content_update(bot: Client, file_name: str) -> None:
 #
 #  Flow:
 #    1. Admin sends: /getdlink kgf
-#    2. Bot searches IMDb, shows up to 5 results as inline buttons
-#    3. Admin taps a result  →  bot shows the formatted preview message
-#       with  [✅ Send to Channels]  [❌ Cancel]  buttons
-#    4. Admin taps Send  →  bot posts to all update channels + records
-#       Admin taps Cancel  →  session cleared, nothing sent
+#    2. Bot searches IMDb, collects all unique results and paginates them
+#       (GETDLINK_PAGE_SIZE per page, Next ➡️ / ⬅️ Prev buttons)
+#    3. Admin taps a result  →  season picker  →  post preview
+#    4. Admin confirms  →  posted to all update channels
 # ══════════════════════════════════════════════════════════════════════════════
+
+def _build_picker_keyboard(
+    results: list[dict],
+    user_id: int,
+    page: int,
+) -> InlineKeyboardMarkup:
+    """Build a paginated result-picker keyboard for /getdlink."""
+    start        = page * GETDLINK_PAGE_SIZE
+    end          = min(start + GETDLINK_PAGE_SIZE, len(results))
+    total_pages  = max(1, -(-len(results) // GETDLINK_PAGE_SIZE))
+
+    buttons: list[list[InlineKeyboardButton]] = []
+    for real_idx in range(start, end):
+        r        = results[real_idx]
+        btn_text = r.get("title", "Unknown")
+        if r.get("year"):
+            btn_text += f"  ({r['year']})"
+        if r.get("kind"):
+            btn_text += f"  [{r['kind']}]"
+        buttons.append([
+            InlineKeyboardButton(
+                btn_text,
+                callback_data=f"gdl_pick:{user_id}:{real_idx}"
+            )
+        ])
+
+    # Pagination row
+    nav_row: list[InlineKeyboardButton] = []
+    if page > 0:
+        nav_row.append(InlineKeyboardButton("⬅️ Prev", callback_data=f"gdl_page:{user_id}:{page - 1}"))
+    if page < total_pages - 1:
+        nav_row.append(InlineKeyboardButton("Next ➡️", callback_data=f"gdl_page:{user_id}:{page + 1}"))
+    if nav_row:
+        buttons.append(nav_row)
+
+    buttons.append([InlineKeyboardButton("❌ Cancel", callback_data=f"gdl_cancel:{user_id}")])
+    return InlineKeyboardMarkup(buttons)
+
 
 @Client.on_message(filters.command("getdlink") & filters.user(ADMINS) & filters.private)
 async def getdlink_cmd(bot: Client, message) -> None:
@@ -308,18 +406,13 @@ async def getdlink_cmd(bot: Client, message) -> None:
             "Example: <code>/getdlink kgf</code>"
         )
 
-    query = " ".join(message.command[1:]).strip()
-    wait  = await message.reply(f"🔍 Searching IMDb for <b>{_esc(query)}</b>…")
+    query_str = " ".join(message.command[1:]).strip()
+    wait      = await message.reply(f"🔍 Searching IMDb for <b>{_esc(query_str)}</b>…")
 
-    # Search IMDb – get_poster can return one result; we call it with a broad
-    # search to get a list. If get_poster only supports single-result lookup,
-    # we do multiple calls with slight variations to surface alternatives.
     results: list[dict] = []
     seen_ids: set[str]  = set()
 
     async def _try(q: str) -> None:
-        if len(results) >= MAX_SEARCH_RESULTS:
-            return
         try:
             r = await get_poster(q)
             if r and r.get("title"):
@@ -330,13 +423,22 @@ async def getdlink_cmd(bot: Client, message) -> None:
         except Exception:
             pass
 
-    await _try(query)
-    await _try(f"{query} film")
-    await _try(f"{query} series")
-    await _try(f"{query} movie")
-    await _try(f"{query} season 1")
+    # Cast a wide net – no cap; duplicates are filtered by seen_ids
+    for variant in (
+        query_str,
+        f"{query_str} film",
+        f"{query_str} series",
+        f"{query_str} movie",
+        f"{query_str} season 1",
+        f"{query_str} season 2",
+        f"{query_str} tv",
+        f"{query_str} anime",
+        f"the {query_str}",
+        f"{query_str} 2",
+    ):
+        await _try(variant)
 
-    # Deduplicate by title+year in case searches returned the same item
+    # Deduplicate by title+year
     deduped: list[dict] = []
     seen_titles: set[str] = set()
     for r in results:
@@ -345,53 +447,69 @@ async def getdlink_cmd(bot: Client, message) -> None:
             seen_titles.add(tk)
             deduped.append(r)
 
-    results = deduped[:MAX_SEARCH_RESULTS]
+    results = deduped
 
     if not results:
         await wait.edit_text(
-            f"❌ No IMDb results found for <b>{_esc(query)}</b>.\n"
+            f"❌ No IMDb results found for <b>{_esc(query_str)}</b>.\n"
             "Try a different title or check the spelling."
         )
         return
 
-    # Store session so callback can retrieve the chosen result
     _getdlink_sessions[message.from_user.id] = {
         "results": results,
-        "query":   query,
+        "query":   query_str,
+        "page":    0,
     }
 
-    # Build picker keyboard – one button per result
-    buttons: list[list[InlineKeyboardButton]] = []
-    for i, r in enumerate(results):
-        label = r.get("title", "Unknown")
-        year  = r.get("year", "")
-        kind  = r.get("kind", "")
-        btn_text = f"{label}"
-        if year:
-            btn_text += f"  ({year})"
-        if kind:
-            btn_text += f"  [{kind}]"
-        buttons.append([
-            InlineKeyboardButton(btn_text, callback_data=f"gdl_pick:{message.from_user.id}:{i}")
-        ])
-    buttons.append([
-        InlineKeyboardButton("❌ Cancel", callback_data=f"gdl_cancel:{message.from_user.id}")
-    ])
+    total_pages = max(1, -(-len(results) // GETDLINK_PAGE_SIZE))
+    markup      = _build_picker_keyboard(results, message.from_user.id, 0)
 
     await wait.edit_text(
-        f"🎬 Found <b>{len(results)}</b> result(s) for <b>{_esc(query)}</b>.\n"
-        "Choose the correct title:",
-        reply_markup=InlineKeyboardMarkup(buttons)
+        f"🎬 Found <b>{len(results)}</b> result(s) for <b>{_esc(query_str)}</b>.\n"
+        f"Page <b>1/{total_pages}</b> — Choose the correct title:",
+        reply_markup=markup
     )
+
+
+@Client.on_callback_query(filters.regex(r"^gdl_page:(\d+):(\d+)$") & filters.user(ADMINS))
+async def getdlink_page_callback(bot: Client, query) -> None:
+    """Navigate pages in the /getdlink result picker."""
+    user_id = int(query.matches[0].group(1))
+    page    = int(query.matches[0].group(2))
+
+    if query.from_user.id != user_id:
+        return await query.answer("This picker belongs to another admin.", show_alert=True)
+
+    session = _getdlink_sessions.get(user_id)
+    if not session:
+        return await query.answer("Session expired. Run /getdlink again.", show_alert=True)
+
+    results     = session["results"]
+    total_pages = max(1, -(-len(results) // GETDLINK_PAGE_SIZE))
+    if page < 0 or page >= total_pages:
+        return await query.answer("Invalid page.", show_alert=True)
+
+    session["page"]   = page
+    query_str         = session.get("query", "")
+    start             = page * GETDLINK_PAGE_SIZE
+    end               = min(start + GETDLINK_PAGE_SIZE, len(results))
+    markup            = _build_picker_keyboard(results, user_id, page)
+
+    await query.edit_message_text(
+        f"🎬 Found <b>{len(results)}</b> result(s) for <b>{_esc(query_str)}</b>.\n"
+        f"Page <b>{page + 1}/{total_pages}</b> — Choose the correct title:",
+        reply_markup=markup
+    )
+    await query.answer()
 
 
 @Client.on_callback_query(filters.regex(r"^gdl_pick:(\d+):(\d+)$") & filters.user(ADMINS))
 async def getdlink_pick_callback(bot: Client, query) -> None:
-    """Admin chose a search result — show the formatted preview."""
-    user_id  = int(query.matches[0].group(1))
-    idx      = int(query.matches[0].group(2))
+    """Admin chose a search result — show the season picker."""
+    user_id = int(query.matches[0].group(1))
+    idx     = int(query.matches[0].group(2))
 
-    # Only the admin who triggered the search can interact
     if query.from_user.id != user_id:
         return await query.answer("This picker belongs to another admin.", show_alert=True)
 
@@ -403,17 +521,11 @@ async def getdlink_pick_callback(bot: Client, query) -> None:
     if idx >= len(results):
         return await query.answer("Invalid selection.", show_alert=True)
 
-    imdb = results[idx]
-
-    # Ask if this is a series so admin can specify season
-    # Store chosen imdb result back into session
+    imdb             = results[idx]
     session["chosen"] = imdb
 
-    # Build season picker – offer Movie / S01…S10
-    season_row_1 = [
-        InlineKeyboardButton("🎬 Movie",  callback_data=f"gdl_season:{user_id}:0"),
-    ]
-    season_rows = [season_row_1]
+    season_row_1 = [InlineKeyboardButton("🎬 Movie", callback_data=f"gdl_season:{user_id}:0")]
+    season_rows  = [season_row_1]
     row: list[InlineKeyboardButton] = []
     for s in range(1, 11):
         row.append(InlineKeyboardButton(f"S{s:02d}", callback_data=f"gdl_season:{user_id}:{s}"))
@@ -422,9 +534,7 @@ async def getdlink_pick_callback(bot: Client, query) -> None:
             row = []
     if row:
         season_rows.append(row)
-    season_rows.append([
-        InlineKeyboardButton("❌ Cancel", callback_data=f"gdl_cancel:{user_id}")
-    ])
+    season_rows.append([InlineKeyboardButton("❌ Cancel", callback_data=f"gdl_cancel:{user_id}")])
 
     title = imdb.get("title", "")
     year  = imdb.get("year", "")
@@ -440,8 +550,8 @@ async def getdlink_pick_callback(bot: Client, query) -> None:
 @Client.on_callback_query(filters.regex(r"^gdl_season:(\d+):(\d+)$") & filters.user(ADMINS))
 async def getdlink_season_callback(bot: Client, query) -> None:
     """Admin chose Movie or a season number — show the post preview."""
-    user_id = int(query.matches[0].group(1))
-    season_n = int(query.matches[0].group(2))   # 0 = movie
+    user_id  = int(query.matches[0].group(1))
+    season_n = int(query.matches[0].group(2))
 
     if query.from_user.id != user_id:
         return await query.answer("This picker belongs to another admin.", show_alert=True)
@@ -453,14 +563,11 @@ async def getdlink_season_callback(bot: Client, query) -> None:
     imdb   = session["chosen"]
     season = str(season_n) if season_n > 0 else None
 
-    # Build the post exactly as auto-update does
     text, search_btn_markup = await _build_update_message(bot, imdb, season=season, lang=None)
 
-    # Store preview state for the confirm step
     session["preview_text"]   = text
     session["preview_season"] = season
 
-    # Add confirm / cancel row below the search button
     confirm_markup = InlineKeyboardMarkup(
         search_btn_markup.inline_keyboard + [[
             InlineKeyboardButton("✅ Send to Channels", callback_data=f"gdl_confirm:{user_id}"),
@@ -500,7 +607,6 @@ async def getdlink_confirm_callback(bot: Client, query) -> None:
         season
     )
 
-    # Check duplicate before sending
     if await db.check_announced_key(imdb_key):
         await query.edit_message_text(
             f"⚠️ <b>{_esc(display_name)}</b> was already announced. Nothing sent."
@@ -508,9 +614,7 @@ async def getdlink_confirm_callback(bot: Client, query) -> None:
         await query.answer()
         return
 
-    # Rebuild clean markup (without the confirm/cancel row)
     _, clean_markup = await _build_update_message(bot, imdb, season=season, lang=None)
-
     sent = await _send_to_channels(bot, preview_text, clean_markup, display_name, imdb_key)
 
     if sent:
