@@ -11,14 +11,15 @@ def is_admin(user) -> bool:
 
 
 def _updates_text():
+    cfg = nu.get_runtime_update_config()
     return (
         "<b>Movie Updates Config</b>\n\n"
-        f"PAGE_SIZE: <code>{nu.PAGE_SIZE}</code>\n"
-        f"SEND_DELAY: <code>{nu.SEND_DELAY}</code>\n"
-        f"GETDLINK_PAGE_SIZE: <code>{nu.GETDLINK_PAGE_SIZE}</code>\n"
-        f"GROUP_SIZE: <code>{nu.GROUP_SIZE}</code>\n"
-        f"CHANNEL_SEND_MODE: <code>{nu.CHANNEL_SEND_MODE}</code>\n"
-        f"GROUP_SEARCH_TEXT: <code>{nu.GROUP_SEARCH_TEXT}</code>"
+        f"PAGE_SIZE: <code>{cfg['PAGE_SIZE']}</code>\n"
+        f"SEND_DELAY: <code>{cfg['SEND_DELAY']}</code>\n"
+        f"GETDLINK_PAGE_SIZE: <code>{cfg['GETDLINK_PAGE_SIZE']}</code>\n"
+        f"GROUP_SIZE: <code>{cfg['GROUP_SIZE']}</code>\n"
+        f"CHANNEL_SEND_MODE: <code>{cfg['CHANNEL_SEND_MODE']}</code>\n"
+        f"GROUP_SEARCH_TEXT: <code>{cfg['GROUP_SEARCH_TEXT']}</code>"
     )
 
 
@@ -134,8 +135,9 @@ async def admin_upd_mode(client, query):
 
 @Client.on_callback_query(filters.regex(r"^admin:setmode:(individual|grouped|manual)$"))
 async def admin_setmode(client, query):
-    nu.CHANNEL_SEND_MODE = query.matches[0].group(1)
-    await query.answer(f"Mode set to {nu.CHANNEL_SEND_MODE}")
+    mode = query.matches[0].group(1)
+    nu.set_runtime_update_config("CHANNEL_SEND_MODE", mode)
+    await query.answer(f"Mode set to {mode}")
     await query.message.edit_text(_updates_text(), reply_markup=_updates_markup())
 
 @Client.on_callback_query(filters.regex(r"^admin:upd:(gsize|psize|dlsize|sdelay)$"))
@@ -147,9 +149,10 @@ async def admin_upd_numeric(client, query):
 @Client.on_callback_query(filters.regex(r"^admin:num:(gsize|psize|dlsize|sdelay):(-?1)$"))
 async def admin_num_apply(client, query):
     key,delta=query.matches[0].group(1), int(query.matches[0].group(2))
-    if key=="gsize": nu.GROUP_SIZE=max(1, nu.GROUP_SIZE+delta)
-    elif key=="psize": nu.PAGE_SIZE=max(1, nu.PAGE_SIZE+delta)
-    elif key=="dlsize": nu.GETDLINK_PAGE_SIZE=max(1, nu.GETDLINK_PAGE_SIZE+delta)
-    elif key=="sdelay": nu.SEND_DELAY=max(0.0, round(nu.SEND_DELAY + (0.1*delta),2))
+    cfg = nu.get_runtime_update_config()
+    if key=="gsize": nu.set_runtime_update_config("GROUP_SIZE", cfg["GROUP_SIZE"] + delta)
+    elif key=="psize": nu.set_runtime_update_config("PAGE_SIZE", cfg["PAGE_SIZE"] + delta)
+    elif key=="dlsize": nu.set_runtime_update_config("GETDLINK_PAGE_SIZE", cfg["GETDLINK_PAGE_SIZE"] + delta)
+    elif key=="sdelay": nu.set_runtime_update_config("SEND_DELAY", round(cfg["SEND_DELAY"] + (0.1*delta), 2))
     await query.answer("Updated")
     await query.message.edit_text(_updates_text(), reply_markup=_updates_markup())
