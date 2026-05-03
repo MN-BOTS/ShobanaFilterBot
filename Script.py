@@ -76,7 +76,8 @@ Each help page contains a short list for easy reading.
 • /fsub - Update force-sub channels
 • /restart, /ping, /usage - System tools
 • /set_template, /setskip, /clear_join_users
-• Bot commands auto-sync on startup"""
+• Bot commands auto-sync on startup
+• Auto-update commands: /setupchat /movieupdates /getdlink /sendupnow /getlist"""
     ]
     ABOUT_TXT = """<b>
 ◎ Cʀᴇᴀᴛᴏʀ: <a href=https://github.com/mntgxo> MN - TG</a>
@@ -183,8 +184,8 @@ Group = {}(<code>{}</code>)
 Total Members = <code>{}</code>
 Added By - {}
 """
-    RESULT_TXT="""<blockquote> Hey,     </blockquote>
-<blockquote>Jᴜsᴛ Sᴇᴇ Wʜᴀᴛ I Found Fᴏʀ Yᴏᴜʀ Qᴜᴇʀʏ </blockquote>"""
+    RESULT_TXT="""Hey {mention} ,     
+Jᴜsᴛ Sᴇᴇ Wʜᴀᴛ I Found Fᴏʀ Yᴏᴜʀ Qᴜᴇʀʏ"""
 
     CUSTOM_FILE_CAPTION = """📂Fɪʟᴇɴᴀᴍᴇ : {file_name}
 FɪʟᴇSɪᴢᴇ : {file_size}
