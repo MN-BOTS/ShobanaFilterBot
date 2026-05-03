@@ -4,6 +4,7 @@ from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from info import ADMINS
 from database.users_chats_db import db
 import plugins.new_updates as nu
+from plugins.commands import build_fsub_details_text
 
 
 def is_admin(user) -> bool:
@@ -68,26 +69,8 @@ async def admin_fsub_set(client, query):
 async def admin_fsub_show(client, query):
     if not is_admin(query.from_user):
         return await query.answer("Not allowed", show_alert=True)
-    channels = await db.get_auth_channels()
-    if not channels:
-        return await query.message.edit_text("No FSUB chats configured.")
-
-    lines = ["<b>Current FSUB Chats</b>"]
-    for cid in channels:
-        try:
-            chat = await client.get_chat(int(cid))
-            title = chat.title or chat.first_name or "Unknown"
-            if chat.username:
-                link = f"https://t.me/{chat.username}"
-            else:
-                invite = await client.create_chat_invite_link(int(cid), member_limit=1)
-                link = invite.invite_link
-            lines.append(f"\n• <b>{title}</b>\nID: <code>{cid}</code>\nLink: {link}")
-            await asyncio.sleep(0.2)
-        except Exception:
-            lines.append(f"\n• ID: <code>{cid}</code>\nLink: unavailable")
-
-    await query.message.edit_text("\n".join(lines), disable_web_page_preview=True)
+    text = await build_fsub_details_text(client)
+    await query.message.edit_text(text, disable_web_page_preview=True)
 
 
 @Client.on_callback_query(filters.regex(r"^admin:updates$"))
