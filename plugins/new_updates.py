@@ -875,8 +875,8 @@ async def getdlink_cancel_callback(bot: Client, query) -> None:
 #  /getlist  –  show today's daily summary to the admin in PM
 # ══════════════════════════════════════════════════════════════════════════════
 
-@Client.on_message(filters.command("getlist") & filters.user(ADMINS) & filters.private)
-async def getlist_cmd(bot: Client, message) -> None:
+@Client.on_message(filters.command(["latest", "getlist"]) & filters.private)
+async def latest_cmd(bot: Client, message) -> None:
     items = await db.get_daily_added()
     if not items:
         return await message.reply("📋 No movies/series added today yet.")
