@@ -147,6 +147,7 @@ movieupdates - Enable/disable auto updater (admin)
 getdlink - Build and preview update post (admin)
 sendupnow - Flush grouped updates immediately (admin)
 getlist - Show today's added-title summary (admin)
+admin - used to manage fsub and movie updates (admin)
 
 Note: Commands are automatically synced to Telegram (BotFather menu) when the bot starts.
 ```
