@@ -11,6 +11,7 @@ from database.users_chats_db import db
 from info import CHANNELS, ADMINS, LOG_CHANNEL, PICS, BATCH_FILE_CAPTION, CUSTOM_FILE_CAPTION, PROTECT_CONTENT, FILE_CHANNELS, FILE_CHANNEL_SENDING_MODE, FILE_AUTO_DELETE_SECONDS
 from utils import get_settings, get_size, is_subscribed, save_group_settings, temp, create_invite_links
 from database.connections_mdb import active_connection
+from plugins.pm_filter import auto_filter
 import re
 import json
 from pyrogram.types import Message
@@ -73,7 +74,7 @@ async def auto_delete_file(client, message, delay):
     except Exception as e:
         logger.error(f"Error deleting file: {e}")
 
-async def send_file_to_user(client, user_id, file_id, protect_content_flag, file_name=None, file_size=None, file_caption=None):
+async def send_file_to_user(client, user_id, file_id, protect_content_flag, file_name=None, file_size=None, file_caption=None, requester_mention=None):
     try:
         # Generate proper caption
         caption = None
@@ -89,6 +90,10 @@ async def send_file_to_user(client, user_id, file_id, protect_content_flag, file
                 caption = file_caption if file_caption else file_name
         else:
             caption = file_caption if file_caption else file_name
+
+        if requester_mention:
+            mention_line = f"Requested by: {requester_mention}"
+            caption = f"{mention_line}\n\n{caption}" if caption else mention_line
 
         # File sending logic with channel support
         if FILE_CHANNEL_SENDING_MODE and FILE_CHANNELS:
@@ -154,7 +159,8 @@ async def checksub_callback(client, callback_query):
                 protect_content_flag=protect_content_flag,
                 file_name=file_details.file_name if file_details else None,
                 file_size=get_size(file_details.file_size) if file_details else None,
-                file_caption=file_details.caption if file_details else None
+                file_caption=file_details.caption if file_details else None,
+                requester_mention=callback_query.from_user.mention if callback_query.from_user else None
             )
             await callback_query.message.delete()
         except Exception as e:
@@ -214,6 +220,20 @@ async def start(client, message):
             parse_mode=enums.ParseMode.HTML
         )
         return
+    if len(message.command) == 2 and message.command[1].startswith('mntgx'):
+        payload = message.command[1]
+        if '_' in payload:
+            searches = payload.split('_', 1)[1]
+        elif '-' in payload:
+            searches = payload.split('-', 1)[1]
+        else:
+            searches = ''
+        search = searches.replace('-', ' ').replace('_', ' ').strip()
+        if search:
+            message.text = search
+            await auto_filter(client, message)
+        return
+
     if not await is_subscribed(message.from_user.id, client):
         links = await create_invite_links(client)
         btn = [[InlineKeyboardButton("🤖 Join Updates Channel", url=url)] for url in links.values()]
@@ -254,12 +274,6 @@ async def start(client, message):
         )
         return
     
-    if len(message.command) == 2 and message.command[1].startswith('mntgx'):
-        searches = message.command[1].split("-", 1)[1] 
-        search = searches.replace('-',' ')
-        message.text = search 
-        await auto_filter(client, message) 
-        return
     data = message.command[1]
     try:
         pre, file_id = data.split('_', 1)
@@ -403,6 +417,28 @@ async def start(client, message):
         file_caption=f_caption
     )
                     
+
+
+async def build_fsub_details_text(client) -> str:
+    channels = await db.get_auth_channels()
+    if not channels:
+        return "No FSUB chats configured."
+
+    lines = ["<b>Current FSUB Chats</b>"]
+    for cid in channels:
+        try:
+            chat = await client.get_chat(int(cid))
+            title = chat.title or chat.first_name or "Unknown"
+            if chat.username:
+                link = f"https://t.me/{chat.username}"
+            else:
+                invite = await client.create_chat_invite_link(int(cid), member_limit=1)
+                link = invite.invite_link
+            lines.append(f"\n• <b>{title}</b>\nID: <code>{cid}</code>\nLink: {link}")
+        except Exception:
+            lines.append(f"\n• ID: <code>{cid}</code>\nLink: unavailable")
+    return "\n".join(lines)
+
 def is_admin(user) -> bool:
     return (
         user.id in ADMINS or
