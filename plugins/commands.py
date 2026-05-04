@@ -417,6 +417,28 @@ async def start(client, message):
         file_caption=f_caption
     )
                     
+
+
+async def build_fsub_details_text(client) -> str:
+    channels = await db.get_auth_channels()
+    if not channels:
+        return "No FSUB chats configured."
+
+    lines = ["<b>Current FSUB Chats</b>"]
+    for cid in channels:
+        try:
+            chat = await client.get_chat(int(cid))
+            title = chat.title or chat.first_name or "Unknown"
+            if chat.username:
+                link = f"https://t.me/{chat.username}"
+            else:
+                invite = await client.create_chat_invite_link(int(cid), member_limit=1)
+                link = invite.invite_link
+            lines.append(f"\n• <b>{title}</b>\nID: <code>{cid}</code>\nLink: {link}")
+        except Exception:
+            lines.append(f"\n• ID: <code>{cid}</code>\nLink: unavailable")
+    return "\n".join(lines)
+
 def is_admin(user) -> bool:
     return (
         user.id in ADMINS or

@@ -46,6 +46,39 @@ _queue_consumer_started: bool = False
 # Accumulates formatted list_entry strings; flushed every GROUP_SIZE items.
 _pending_group: list[str] = []
 
+
+
+# Runtime config helpers for admin panel
+def get_runtime_update_config() -> dict:
+    return {
+        "PAGE_SIZE": PAGE_SIZE,
+        "SEND_DELAY": SEND_DELAY,
+        "GETDLINK_PAGE_SIZE": GETDLINK_PAGE_SIZE,
+        "GROUP_SIZE": GROUP_SIZE,
+        "CHANNEL_SEND_MODE": CHANNEL_SEND_MODE,
+        "GROUP_SEARCH_TEXT": GROUP_SEARCH_TEXT,
+    }
+
+
+def set_runtime_update_config(key: str, value):
+    global PAGE_SIZE, SEND_DELAY, GETDLINK_PAGE_SIZE, GROUP_SIZE, CHANNEL_SEND_MODE, GROUP_SEARCH_TEXT
+    if key == "PAGE_SIZE":
+        PAGE_SIZE = max(1, int(value))
+    elif key == "SEND_DELAY":
+        SEND_DELAY = max(0.0, float(value))
+    elif key == "GETDLINK_PAGE_SIZE":
+        GETDLINK_PAGE_SIZE = max(1, int(value))
+    elif key == "GROUP_SIZE":
+        GROUP_SIZE = max(1, int(value))
+    elif key == "CHANNEL_SEND_MODE":
+        if value not in {"individual", "grouped", "manual"}:
+            raise ValueError("Invalid CHANNEL_SEND_MODE")
+        CHANNEL_SEND_MODE = value
+    elif key == "GROUP_SEARCH_TEXT":
+        GROUP_SEARCH_TEXT = str(value)
+    else:
+        raise KeyError(key)
+
 # ─── Per-admin session state for /getdlink flow ───────────────────────────────
 # Structure: { user_id: { "results": [...], "query": str, "page": int } }
 _getdlink_sessions: dict[int, dict] = {}
@@ -875,8 +908,8 @@ async def getdlink_cancel_callback(bot: Client, query) -> None:
 #  /getlist  –  show today's daily summary to the admin in PM
 # ══════════════════════════════════════════════════════════════════════════════
 
-@Client.on_message(filters.command("getlist") & filters.user(ADMINS) & filters.private)
-async def getlist_cmd(bot: Client, message) -> None:
+@Client.on_message(filters.command(["latest", "getlist"]) & filters.private)
+async def latest_cmd(bot: Client, message) -> None:
     items = await db.get_daily_added()
     if not items:
         return await message.reply("📋 No movies/series added today yet.")
