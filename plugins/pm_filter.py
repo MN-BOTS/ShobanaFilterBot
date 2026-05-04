@@ -41,8 +41,8 @@ SPELL_CHECK = {}
 async def give_filter(client, message):
     try:
         await message.delete()
-    except Exception as e:
-        logger.exception("Failed to delete message:", e)
+    except Exception:
+        logger.exception("Failed to delete message")
 
     k = await manual_filters(client, message)
     if k == False:
@@ -876,7 +876,6 @@ async def advantage_spell_chok(client, msg):
     mv_id = msg.id
     mv_rqst = msg.text
     reqstr1 = msg.from_user.id if msg.from_user else 0
-    reqstr = await client.get_users(reqstr1)
     settings = await get_settings(msg.chat.id)
     query = re.sub(
         r"\b(pl(i|e)*?(s|z+|ease|se|ese|(e+)s(e)?)|((send|snd|giv(e)?|gib)(\sme)?)|movie(s)?|new|latest|br((o|u)h?)*|^h(e|a)?(l)*(o)*|mal(ayalam)?|t(h)?amil|file|that|find|und(o)*|kit(t(i|y)?)?o(w)?|thar(u)?(o)*w?|kittum(o)*|aya(k)*(um(o)*)?|full\smovie|any(one)|with\ssubtitle(s)?)",
@@ -888,10 +887,10 @@ async def advantage_spell_chok(client, msg):
         logger.exception(e)
         reqst_gle = mv_rqst.replace(" ", "+")
         button = [[
-                 InlineKeyboardButton('ENG', 'esp'),
-                 InlineKeyboardButton('MAL', 'msp'),
-                 InlineKeyboardButton('HIN', 'hsp'),
-                 InlineKeyboardButton('TAM', 'tsp')
+                 InlineKeyboardButton('ENG', callback_data='esp'),
+                 InlineKeyboardButton('MAL', callback_data='msp'),
+                 InlineKeyboardButton('HIN', callback_data='hsp'),
+                 InlineKeyboardButton('TAM', callback_data='tsp')
         ],[
                  InlineKeyboardButton('🔍 ɢᴏᴏɢʟᴇ 🔎', url=f"https://www.google.com/search?q={reqst_gle}")
              ]]
@@ -908,10 +907,10 @@ async def advantage_spell_chok(client, msg):
     if not movies:
         reqst_gle = mv_rqst.replace(" ", "+")
         button = [[
-                 InlineKeyboardButton('ENG', 'esp'),
-                 InlineKeyboardButton('MAL', 'msp'),
-                 InlineKeyboardButton('HIN', 'hsp'),
-                 InlineKeyboardButton('TAM', 'tsp')
+                 InlineKeyboardButton('ENG', callback_data='esp'),
+                 InlineKeyboardButton('MAL', callback_data='msp'),
+                 InlineKeyboardButton('HIN', callback_data='hsp'),
+                 InlineKeyboardButton('TAM', callback_data='tsp')
         ],[
                  InlineKeyboardButton('🔍 ɢᴏᴏɢʟᴇ 🔎', url=f"https://www.google.com/search?q={reqst_gle}")
              ]]
@@ -924,7 +923,10 @@ async def advantage_spell_chok(client, msg):
         await asyncio.sleep(60)
         await k.delete()
         return
-    movielist = [movie.get('title') for movie in movies]
+    movielist = [movie.get('title') for movie in movies if movie.get('title')]
+    if not movielist:
+        return
+
     SPELL_CHECK[mv_id] = movielist
     btn = [
         [
