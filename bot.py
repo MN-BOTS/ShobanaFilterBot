@@ -18,6 +18,7 @@ logging.getLogger("asyncio").setLevel(logging.CRITICAL - 1)
 
 import tgcrypto
 from pyrogram import Client, __version__
+from pyrogram.types import BotCommand
 from pyrogram.raw.all import layer
 from database.ia_filterdb import Media
 from database.users_chats_db import db
@@ -35,8 +36,30 @@ pyroutils.MIN_CHAT_ID = -999999999999
 pyroutils.MIN_CHANNEL_ID = -100999999999999
 
 from plugins.webcode import bot_run
+from plugins.new_updates import run_daily_summary
 
 PORT_CODE = environ.get("PORT", "8080")
+
+
+BOT_COMMANDS = [
+    BotCommand("start", "Start the bot"),
+    BotCommand("movies", "Latest added movies"),
+    BotCommand("series", "Latest added series"),
+    BotCommand("connect", "Connect group to PM"),
+    BotCommand("disconnect", "Disconnect active chat"),
+    BotCommand("connections", "Show your connections"),
+    BotCommand("settings", "Open group settings"),
+    BotCommand("filter", "Create manual filter"),
+    BotCommand("filters", "List filters"),
+    BotCommand("imdb", "Search movie/series info"),
+    BotCommand("mnsearch", "Search movie/series info"),
+    BotCommand("bug", "Send bug report / feedback"),
+    BotCommand("search", "Search from external sources"),
+    BotCommand("deletefiles", "Bulk delete indexed files"),
+    BotCommand("stats", "Show database statistics"),
+    BotCommand("ping", "Check bot ping")
+]
+
 
 
 # ✅ Add this block
@@ -94,6 +117,8 @@ class Bot(Client):
 
         logging.info(f"{me.first_name} running on Pyrogram v{__version__} (Layer {layer}) started on {me.username}.")
         logging.info(LOG_STR)
+        await self.set_bot_commands(BOT_COMMANDS)
+        logging.info("Bot commands synced successfully.")
         await self.send_message(chat_id=LOG_CHANNEL, text=script.RESTART_TXT)
 
         print("mntg4u</>")
@@ -106,6 +131,7 @@ class Bot(Client):
 
         asyncio.create_task(self.kulasthree())
         asyncio.create_task(keep_alive())
+        asyncio.create_task(run_daily_summary(self))
 
         client = webserver.AppRunner(await bot_run())
         await client.setup()
