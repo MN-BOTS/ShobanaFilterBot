@@ -62,10 +62,14 @@ async def answer(bot, query):
 
     offset = int(query.offset or 0)
     reply_markup = get_reply_markup(query=string)
-    files, next_offset, total = await get_search_results(string,
-                                                  file_type=file_type,
-                                                  max_results=10,
-                                                  offset=offset)
+    files, next_offset, total, search_time = await get_search_results(
+        string,
+        file_type=file_type,
+        max_results=10,
+        offset=offset,
+        fast=True,
+        return_time=True,
+    )
 
     for file in files:
         title=file.file_name
@@ -91,6 +95,7 @@ async def answer(bot, query):
         switch_pm_text = f"{emoji.FILE_FOLDER} Results "
         if string:
             switch_pm_text += f" for {string}"
+        switch_pm_text += f" • {search_time:.2f}s"
         try:
             await query.answer(results=results,
                            is_personal = True,
