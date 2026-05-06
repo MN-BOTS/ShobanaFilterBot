@@ -10,6 +10,7 @@ from pyrogram.file_id import FileId
 from pymongo.errors import DuplicateKeyError, OperationFailure
 from motor.motor_asyncio import AsyncIOMotorClient
 import hashlib
+from collections import defaultdict
 from sqlalchemy import text
 
 from info import (
@@ -397,70 +398,6 @@ async def save_file(media):
     return True, 1
 
 
-async def get_search_results(query, file_type=None, max_results=10, offset=0, filter=False):
-    """For given query return (results, next_offset)"""
-
-    query = query.strip()
-    if not query:
-        raw_pattern = '.'
-    elif ' ' not in query:
-        raw_pattern = r'(\b|[\.\+\-_])' + query + r'(\b|[\.\+\-_])'
-    else:
-        raw_pattern = query.replace(' ', r'.*[\s\.\+\-_]')
-
-    try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
-    except Exception:
-        return []
-
-    if USE_CAPTION_FILTER:
-        filter = {'$or': [{'file_name': regex}, {'caption': regex}]}
-    else:
-        filter = {'file_name': regex}
-
-    if file_type:
-        filter['file_type'] = file_type
-
-    if MONGO_SHARD_COUNT == 1:
-        col = _mongo_collections[0]
-        total_results = await col.count_documents(filter)
-        next_offset = offset + max_results
-        if next_offset >= total_results:
-            next_offset = ''
-        docs = await col.find(filter).sort('created_at', -1).skip(offset).limit(max_results).to_list(length=max_results)
-        return [_as_media_doc(d) for d in docs], next_offset, total_results
-
-    count_tasks = [col.count_documents(filter) for col in _mongo_collections]
-    total_results = sum(await asyncio.gather(*count_tasks))
-    next_offset = offset + max_results
-    if next_offset >= total_results:
-        next_offset = ''
-
-    fetch_limit = max(offset + max_results, max_results)
-
-    async def _fetch(col):
-        docs = await col.find(filter).sort('created_at', -1).limit(fetch_limit).to_list(length=fetch_limit)
-        return [_as_media_doc(d) for d in docs]
-
-    parts = await asyncio.gather(*[_fetch(c) for c in _mongo_collections])
-    files = [d for part in parts for d in part]
-    files.sort(key=lambda d: d.get('created_at', 0), reverse=True)
-    files = files[offset: offset + max_results]
-
-    return files, next_offset, total_results
-
-
-async def get_file_details(query):
-    filter = {'_id': query}
-    if MONGO_SHARD_COUNT == 1:
-        filedetails = await _mongo_collections[0].find(filter).limit(1).to_list(length=1)
-        return [_as_media_doc(filedetails[0])] if filedetails else []
-    for col in _mongo_collections:
-        filedetails = await col.find(filter).limit(1).to_list(length=1)
-        if filedetails:
-            return [_as_media_doc(filedetails[0])]
-    return []
-
 
 def encode_file_id(s: bytes) -> str:
     r = b""
@@ -498,40 +435,6 @@ def unpack_new_file_id(new_file_id):
     file_ref = encode_file_ref(decoded.file_reference)
     return file_id, file_ref
 
-from collections import defaultdict
-
-async def get_movie_list(limit=20):
-    cursor = Media.find().sort("$natural", -1).limit(100)
-    files = await cursor.to_list(length=100)
-    results = []
-
-    for file in files:
-        name = getattr(file, "file_name", "")
-        if not re.search(r"(s\d{1,2}|season\s*\d+).*?(e\d{1,2}|episode\s*\d+)", name, re.I):
-            results.append(name)
-        if len(results) >= limit:
-            break
-    return results
-
-
-async def get_series_grouped(limit=30):
-    cursor = Media.find().sort("$natural", -1).limit(150)
-    files = await cursor.to_list(length=150)
-    grouped = defaultdict(list)
-
-    for file in files:
-        name = getattr(file, "file_name", "")
-        match = re.search(r"(.*?)(?:S\d{1,2}|Season\s*\d+).*?(?:E|Ep|Episode)?(\d{1,2})", name, re.I)
-        if match:
-            title = match.group(1).strip().title()
-            episode = int(match.group(2))
-            grouped[title].append(episode)
-
-    return {
-        title: sorted(set(eps))[:10]
-        for title, eps in grouped.items() if eps
-    }
-
 # SQL fast-path overrides
 
 def _sql_row_to_doc(row):
@@ -550,14 +453,40 @@ def _sql_row_to_doc(row):
     )
 
 
-async def get_search_results(query, file_type=None, max_results=10, offset=0, filter=False):
-    """For given query return (results, next_offset)"""
+def _build_mongo_search_filter(query, file_type=None):
+    if not query:
+        raw_pattern = '.'
+    elif ' ' not in query:
+        boundary = r'[\.\+\-_\(\)\[\]\{\}\s]'
+        raw_pattern = rf'(\b|{boundary}){re.escape(query)}(\b|{boundary})'
+    else:
+        raw_pattern = r'.*'.join(map(re.escape, query.split()))
 
-    query = query.strip()
+    regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+    if USE_CAPTION_FILTER:
+        search_filter = {'$or': [{'file_name': regex}, {'caption': regex}]}
+    else:
+        search_filter = {'file_name': regex}
+
+    if file_type:
+        search_filter['file_type'] = file_type
+    return search_filter
+
+
+async def get_search_results(query, file_type=None, max_results=10, offset=0, filter=False):
+    """Return matching media files, next offset, and total result count."""
+
+    query = (query or '').strip()
+    offset = max(int(offset or 0), 0)
+    max_results = max(int(max_results or 0), 0)
+
+    if max_results == 0:
+        return [], '', 0
+
     if not USE_MONGO:
         terms = [t for t in query.split() if t]
         where = []
-        params = {"offset": int(offset), "limit": int(max_results)}
+        params = {"offset": offset, "limit": max_results}
 
         if file_type:
             where.append("file_type = :file_type")
@@ -597,39 +526,57 @@ async def get_search_results(query, file_type=None, max_results=10, offset=0, fi
             next_offset = ''
         return files, next_offset, total_results
 
-    if not query:
-        raw_pattern = '.'
-    elif ' ' not in query:
-        raw_pattern = r'(\b|[\.\+\-_\(\)\[\]\{\}\s])' + re.escape(query) + r'(\b|[\.\+\-_\(\)\[\]\{\}\s])'
-    else:
-        raw_pattern = r'.*'.join(map(re.escape, query.split()))
-
     try:
-        regex = re.compile(raw_pattern, flags=re.IGNORECASE)
+        search_filter = _build_mongo_search_filter(query, file_type=file_type)
     except Exception:
-        return []
+        return [], '', 0
 
-    if USE_CAPTION_FILTER:
-        filter = {'$or': [{'file_name': regex}, {'caption': regex}]}
-    else:
-        filter = {'file_name': regex}
+    projection = {
+        'file_ref': 1,
+        'file_name': 1,
+        'file_size': 1,
+        'file_type': 1,
+        'mime_type': 1,
+        'caption': 1,
+        'created_at': 1,
+    }
 
-    if file_type:
-        filter['file_type'] = file_type
+    if MONGO_SHARD_COUNT == 1:
+        col = _mongo_collections[0]
+        count_task = col.count_documents(search_filter)
+        docs_task = (
+            col.find(search_filter, projection)
+            .sort('created_at', -1)
+            .skip(offset)
+            .limit(max_results)
+            .to_list(length=max_results)
+        )
+        total_results, docs = await asyncio.gather(count_task, docs_task)
+        next_offset = offset + max_results
+        if next_offset >= total_results:
+            next_offset = ''
+        return [_as_media_doc(d) for d in docs], next_offset, total_results
 
-    count_tasks = [col.count_documents(filter) for col in _mongo_collections]
-    total_results = sum(await asyncio.gather(*count_tasks))
+    fetch_limit = offset + max_results
+
+    async def _fetch(col):
+        docs = await (
+            col.find(search_filter, projection)
+            .sort('created_at', -1)
+            .limit(fetch_limit)
+            .to_list(length=fetch_limit)
+        )
+        return [_as_media_doc(d) for d in docs]
+
+    count_task = asyncio.gather(*[col.count_documents(search_filter) for col in _mongo_collections])
+    fetch_task = asyncio.gather(*[_fetch(col) for col in _mongo_collections])
+    counts, parts = await asyncio.gather(count_task, fetch_task)
+
+    total_results = sum(counts)
     next_offset = offset + max_results
     if next_offset >= total_results:
         next_offset = ''
 
-    fetch_limit = max(offset + max_results, max_results)
-
-    async def _fetch(col):
-        docs = await col.find(filter).sort('created_at', -1).limit(fetch_limit).to_list(length=fetch_limit)
-        return [_as_media_doc(d) for d in docs]
-
-    parts = await asyncio.gather(*[_fetch(c) for c in _mongo_collections])
     files = [d for part in parts for d in part]
     files.sort(key=lambda d: d.get('created_at', 0), reverse=True)
     files = files[offset: offset + max_results]
@@ -649,9 +596,21 @@ async def get_file_details(query):
             ).first()
         return [_sql_row_to_doc(row)] if row else []
 
-    filter = {'_id': query}
-    for col in _mongo_collections:
-        filedetails = await col.find(filter).limit(1).to_list(length=1)
+    search_filter = {'_id': query}
+    if MONGO_SHARD_COUNT == 1:
+        filedetails = await _mongo_collections[0].find(search_filter).limit(1).to_list(length=1)
+        return [_as_media_doc(filedetails[0])] if filedetails else []
+
+    primary_col = _target_collection(query)
+    filedetails = await primary_col.find(search_filter).limit(1).to_list(length=1)
+    if filedetails:
+        return [_as_media_doc(filedetails[0])]
+
+    fallback_cols = [col for col in _mongo_collections if col is not primary_col]
+    fallback_results = await asyncio.gather(
+        *[col.find(search_filter).limit(1).to_list(length=1) for col in fallback_cols]
+    )
+    for filedetails in fallback_results:
         if filedetails:
             return [_as_media_doc(filedetails[0])]
     return []

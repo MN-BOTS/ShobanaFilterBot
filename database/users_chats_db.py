@@ -62,6 +62,18 @@ class Database:
                 client = self._client if key[0] == uri else motor.motor_asyncio.AsyncIOMotorClient(key[0])
                 self._mongo_dbs.append(client[key[1]])
 
+
+    async def ensure_indexes(self):
+        if not self.use_mongo:
+            return
+        await asyncio.gather(
+            self.col.create_index('id'),
+            self.col.create_index('ban_status.is_banned'),
+            self.grp.create_index('id'),
+            self.grp.create_index('chat_status.is_disabled'),
+            return_exceptions=True,
+        )
+
     def new_user(self, id, name):
         return dict(id=id, name=name, ban_status=dict(is_banned=False, ban_reason=""))
 
@@ -70,7 +82,11 @@ class Database:
 
     async def add_user(self, id, name):
         if self.use_mongo:
-            await self.col.insert_one(self.new_user(id, name))
+            await self.col.update_one(
+                {'id': int(id)},
+                {'$setOnInsert': self.new_user(int(id), name)},
+                upsert=True,
+            )
             return
         with store.begin() as conn:
             exists = conn.execute(text("SELECT 1 FROM users WHERE id=:id"), {"id": int(id)}).first()
@@ -142,11 +158,13 @@ class Database:
 
     async def get_banned(self):
         if self.use_mongo:
-            users = self.col.find({'ban_status.is_banned': True})
-            chats = self.grp.find({'chat_status.is_disabled': True})
-            b_chats = [chat['id'] async for chat in chats]
-            b_users = [user['id'] async for user in users]
-            return b_users, b_chats
+            users = self.col.find({'ban_status.is_banned': True}, {'_id': 0, 'id': 1})
+            chats = self.grp.find({'chat_status.is_disabled': True}, {'_id': 0, 'id': 1})
+            user_docs, chat_docs = await asyncio.gather(
+                users.to_list(length=None),
+                chats.to_list(length=None),
+            )
+            return [user['id'] for user in user_docs], [chat['id'] for chat in chat_docs]
         with store.begin() as conn:
             b_users = [r[0] for r in conn.execute(text("SELECT id FROM users WHERE ban_is_banned=TRUE")).fetchall()]
             b_chats = [r[0] for r in conn.execute(text("SELECT id FROM groups_data WHERE chat_is_disabled=TRUE")).fetchall()]
@@ -154,7 +172,11 @@ class Database:
 
     async def add_chat(self, chat, title):
         if self.use_mongo:
-            await self.grp.insert_one(self.new_group(chat, title))
+            await self.grp.update_one(
+                {'id': int(chat)},
+                {'$setOnInsert': self.new_group(int(chat), title)},
+                upsert=True,
+            )
             return
         with store.begin() as conn:
             exists = conn.execute(text("SELECT 1 FROM groups_data WHERE id=:id"), {"id": int(chat)}).first()
