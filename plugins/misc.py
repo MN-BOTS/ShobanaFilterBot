@@ -2,7 +2,7 @@ import os
 from pyrogram import Client, filters, enums
 from pyrogram.errors.exceptions.bad_request_400 import UserNotParticipant, MediaEmpty, PhotoInvalidDimensions, WebpageMediaEmpty
 from info import IMDB_TEMPLATE
-from utils import extract_user, get_file_id, get_poster, last_online, search_imdb
+from utils import extract_user, get_file_id, get_poster, last_online, search_imdb_async
 import time
 from datetime import datetime
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -134,7 +134,7 @@ async def imdb_search(client, message):
 
     k = await message.reply('Searching ImDB')
     _, title = message.text.split(None, 1)
-    data = search_imdb(title, page=1)
+    data = await search_imdb_async(title, page=1)
     movies = data.get("results")
     if not movies:
         return await k.edit("No results Found")
@@ -157,7 +157,7 @@ async def imdb_search(client, message):
 async def imdb_page_callback(bot: Client, quer_y: CallbackQuery):
     _, title, page = quer_y.data.split('#', 2)
     page = int(page)
-    data = search_imdb(title, page=page)
+    data = await search_imdb_async(title, page=page)
     movies = data.get("results")
     if not movies:
         await quer_y.answer("No more results", show_alert=True)
