@@ -1,6 +1,7 @@
+import asyncio
 import logging
 
-import pymongo
+from motor.motor_asyncio import AsyncIOMotorClient
 from pyrogram import enums
 from sqlalchemy import text
 
@@ -15,7 +16,7 @@ if not USE_MONGO:
     from database.sql_store import store
 
 if USE_MONGO:
-    myclient = pymongo.MongoClient(DATABASE_URI)
+    myclient = AsyncIOMotorClient(DATABASE_URI)
     mydb = myclient[DATABASE_NAME]
 
 
@@ -23,7 +24,7 @@ async def add_filter(grp_id, text_key, reply_text, btn, file, alert):
     if USE_MONGO:
         mycol = mydb[str(grp_id)]
         data = {'text': str(text_key), 'reply': str(reply_text), 'btn': str(btn), 'file': str(file), 'alert': str(alert)}
-        mycol.update_one({'text': str(text_key)}, {"$set": data}, upsert=True)
+        await mycol.update_one({'text': str(text_key)}, {"$set": data}, upsert=True)
         return
 
     with store.begin() as conn:
@@ -38,16 +39,13 @@ async def add_filter(grp_id, text_key, reply_text, btn, file, alert):
 async def find_filter(group_id, name):
     if USE_MONGO:
         mycol = mydb[str(group_id)]
-        query = mycol.find({"text": name})
-        try:
-            for file in query:
-                reply_text = file['reply']
-                btn = file['btn']
-                fileid = file['file']
-                alert = file.get('alert')
-            return reply_text, btn, alert, fileid
-        except Exception:
+        file = await mycol.find_one(
+            {"text": name},
+            {"_id": 0, "reply": 1, "btn": 1, "file": 1, "alert": 1},
+        )
+        if not file:
             return None, None, None, None
+        return file.get('reply'), file.get('btn'), file.get('alert'), file.get('file')
 
     with store.begin() as conn:
         row = conn.execute(text("SELECT reply_text, btn, alert, file_id FROM filters WHERE group_id=:g AND text_key=:t"), {"g": group_id, "t": name}).first()
@@ -57,7 +55,7 @@ async def find_filter(group_id, name):
 async def get_filters(group_id):
     if USE_MONGO:
         mycol = mydb[str(group_id)]
-        return [file['text'] for file in mycol.find()]
+        return [file['text'] async for file in mycol.find({}, {'_id': 0, 'text': 1})]
 
     with store.begin() as conn:
         return [r[0] for r in conn.execute(text("SELECT text_key FROM filters WHERE group_id=:g"), {"g": group_id}).fetchall()]
@@ -67,8 +65,8 @@ async def delete_filter(message, text_key, group_id):
     if USE_MONGO:
         mycol = mydb[str(group_id)]
         myquery = {'text': text_key}
-        if mycol.count_documents(myquery) == 1:
-            mycol.delete_one(myquery)
+        result = await mycol.delete_one(myquery)
+        if result.deleted_count == 1:
             await message.reply_text(f"'`{text_key}`'  deleted. I'll not respond to that filter anymore.", quote=True, parse_mode=enums.ParseMode.MARKDOWN)
         else:
             await message.reply_text("Couldn't find that filter!", quote=True)
@@ -84,10 +82,10 @@ async def delete_filter(message, text_key, group_id):
 
 async def del_all(message, group_id, title):
     if USE_MONGO:
-        if str(group_id) not in mydb.list_collection_names():
+        if str(group_id) not in await mydb.list_collection_names():
             await message.edit_text(f"Nothing to remove in {title}!")
             return
-        mydb[str(group_id)].drop()
+        await mydb[str(group_id)].drop()
         await message.edit_text(f"All filters from {title} has been removed")
         return
 
@@ -103,7 +101,7 @@ async def del_all(message, group_id, title):
 async def count_filters(group_id):
     if USE_MONGO:
         mycol = mydb[str(group_id)]
-        count = mycol.count()
+        count = await mycol.count_documents({})
         return False if count == 0 else count
 
     with store.begin() as conn:
@@ -113,13 +111,13 @@ async def count_filters(group_id):
 
 async def filter_stats():
     if USE_MONGO:
-        collections = mydb.list_collection_names()
+        collections = await mydb.list_collection_names()
         if "CONNECTION" in collections:
             collections.remove("CONNECTION")
-        totalcount = 0
-        for collection in collections:
-            totalcount += mydb[collection].count()
-        return len(collections), totalcount
+        counts = await asyncio.gather(
+            *[mydb[collection].count_documents({}) for collection in collections]
+        )
+        return len(collections), sum(counts)
 
     with store.begin() as conn:
         totalcollections = int(conn.execute(text("SELECT COUNT(DISTINCT group_id) FROM filters")).scalar() or 0)

@@ -37,6 +37,10 @@ MONGO_DB_COUNT = len([u for u in (DATABASE_URI, DATABASE_URI2, DATABASE_URI3, DA
 SPELL_CHECK = {}
 
 
+def _format_search_time(seconds):
+    return f"⏱ Results fetched in: {seconds:.2f}s"
+
+
 @Client.on_message(filters.group | filters.private & filters.text & filters.incoming) 
 async def give_filter(client, message):
     try:
@@ -64,7 +68,9 @@ async def next_page(bot, query):
         await query.answer(script.OLD_MES, show_alert=True)
         return
 
-    files, n_offset, total = await get_search_results(search, offset=offset, filter=True)
+    files, n_offset, total, search_time = await get_search_results(
+        search, offset=offset, filter=True, fast=True, return_time=True
+    )
     try:
         n_offset = int(n_offset)
     except:
@@ -81,6 +87,7 @@ async def next_page(bot, query):
             file_link = f"https://t.me/{temp.U_NAME}?start=file_{file.file_id}"
             cap_lines.append(f"📁 {get_size(file.file_size)} - [{file.file_name}]({file_link})")
         cap_text = "\n".join(cap_lines)
+        cap_text = f"{cap_text}\n\n{_format_search_time(search_time)}"
         btn = []
     else:
         if settings['button']:
@@ -150,7 +157,7 @@ async def next_page(bot, query):
     except MessageNotModified:
         pass
 
-    await query.answer()
+    await query.answer(_format_search_time(search_time))
 
 @Client.on_callback_query(filters.regex(r"^spol")) 
 async def advantage_spoll_choker(bot, query):
@@ -166,9 +173,11 @@ async def advantage_spoll_choker(bot, query):
     await query.answer(script.CHK_MOV_ALRT)#script change
     k = await manual_filters(bot, query.message, text=movie)
     if k == False:
-        files, offset, total_results = await get_search_results(movie, offset=0, filter=True)
+        files, offset, total_results, search_time = await get_search_results(
+            movie, offset=0, filter=True, fast=True, return_time=True
+        )
         if files:
-            k = (movie, files, offset, total_results)
+            k = (movie, files, offset, total_results, search_time)
             await auto_filter(bot, query, k)
         else:
             k = await query.message.edit(script.MOV_NT_FND)#script change
@@ -724,7 +733,9 @@ async def auto_filter(client, msg, spoll=False):
             return
         if 2 < len(message.text) < 100:
             search = message.text
-            files, offset, total_results = await get_search_results(search.lower(), offset=0, filter=True)
+            files, offset, total_results, search_time = await get_search_results(
+                search.lower(), offset=0, filter=True, fast=True, return_time=True
+            )
             if not files:
                 if settings["spell_check"]:
                     return await advantage_spell_chok(client, msg)
@@ -735,7 +746,11 @@ async def auto_filter(client, msg, spoll=False):
     else:
         settings = await get_settings(msg.message.chat.id)
         message = msg.message.reply_to_message  # msg is CallbackQuery
-        search, files, offset, total_results = spoll
+        if len(spoll) == 5:
+            search, files, offset, total_results, search_time = spoll
+        else:
+            search, files, offset, total_results = spoll
+            search_time = 0
 
     pre = 'filep' if settings['file_secure'] else 'file'
 
@@ -745,6 +760,7 @@ async def auto_filter(client, msg, spoll=False):
             file_link = f"https://t.me/{temp.U_NAME}?start={pre}_{file.file_id}"
             cap_lines.append(f"📁 {get_size(file.file_size)} - [{file.file_name}]({file_link})")
         cap_text = "\n".join(cap_lines)
+        cap_text = f"{cap_text}\n\n{_format_search_time(search_time)}"
 
         btn = []
         if offset != "":
@@ -829,6 +845,8 @@ async def auto_filter(client, msg, spoll=False):
     else:
         mention = message.from_user.mention if message.from_user else "User"
         cap = script.RESULT_TXT.format(mention=mention, query=search)
+
+    cap = f"{cap}\n\n{_format_search_time(search_time)}"
 
     if imdb and imdb.get('poster'):
         try:

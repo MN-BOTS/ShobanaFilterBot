@@ -27,6 +27,7 @@ BTN_URL_REGEX = re.compile(
 )
 
 IMDB_API_BASE = "https://mn-api-imdb.vercel.app/api/search"
+HTTP_TIMEOUT = 10
 
 BANNED = {}
 SMART_OPEN = '“'
@@ -104,17 +105,27 @@ async def create_invite_links(client) -> dict:
 #please give credits https://github.com/MN-BOTS/ShobanaFilterBot
 
 
+def _get_json(url):
+    response = requests.get(url, timeout=HTTP_TIMEOUT)
+    response.raise_for_status()
+    return response.json()
+
+
 def search_imdb(query, page=1):
     search_url = f"{IMDB_API_BASE}?q={quote_plus(query)}&page={page}"
-    response = requests.get(search_url, timeout=10)
-    response.raise_for_status()
-    data = response.json()
+    data = _get_json(search_url)
     return {
         "results": data.get("Search") or [],
         "page": int(data.get("page") or page),
         "next_page": data.get("nextPage"),
         "total_results": int(data.get("totalResults") or 0),
     }
+
+
+async def search_imdb_async(query, page=1):
+    return await asyncio.to_thread(search_imdb, query, page)
+
+
 async def get_poster(query, bulk=False, id=False, file=None):
     if not id:
         # https://t.me/GetTGLink/4183
@@ -130,7 +141,7 @@ async def get_poster(query, bulk=False, id=False, file=None):
                 year = list_to_str(year[:1]) 
         else:
             year = None
-        search_data = search_imdb(title, page=1)
+        search_data = await search_imdb_async(title, page=1)
         movie_list = search_data.get("results") or []
         if not movie_list:
             return None
@@ -148,9 +159,7 @@ async def get_poster(query, bulk=False, id=False, file=None):
         movieid = query
 
     details_url = f"{IMDB_API_BASE}?id={movieid}"
-    response = requests.get(details_url, timeout=10)
-    response.raise_for_status()
-    movie = response.json()
+    movie = await asyncio.to_thread(_get_json, details_url)
 
     plot = movie.get("Plot") or ""
     if plot and len(plot) > 800:
@@ -215,7 +224,7 @@ async def search_gagala(text):
         }
     text = text.replace(" ", '+')
     url = f'https://www.google.com/search?q={text}'
-    response = requests.get(url, headers=usr_agent)
+    response = await asyncio.to_thread(requests.get, url, headers=usr_agent, timeout=HTTP_TIMEOUT)
     response.raise_for_status()
     soup = BeautifulSoup(response.text, 'html.parser')
     titles = soup.find_all( 'h3' )
