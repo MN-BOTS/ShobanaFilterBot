@@ -48,10 +48,7 @@
 - ✅ Ban, Unban, Enable, Disable Commands  
 - ✅ File Storage  
 - ✅ Auto-Approval for Requests  
-- ✅ Shortener Link Support (`/short`)  
 - ✅ Feedback System  
-- ✅ Font Styling (`/font`)  
-- ✅ User Promotion/Demotion  
 - ✅ Pin/Unpin Messages  
 - ✅ Image-to-Link Conversion
 - ✅ Auto Delete: Automatically removes user messages after processing, so you don't need a separate auto-delete bot
@@ -93,32 +90,15 @@ bug - Send bug report / feedback
 bugs - Send bug report / feedback (alias)
 feedback - Send feedback (alias)
 search - Search from external sources
-paste - Create paste link
-pasty - Create paste link (alias)
-tgpaste - Create paste link (alias)
-short - Shorten URL
-tr - Translate replied text
-font - Style your text
-genpassword - Generate strong password
-genpw - Generate strong password (alias)
-tts - Text to speech
-carbon - Generate carbon image
-stickerid - Get sticker file ID
-json - Show message JSON
-js - Show message JSON (alias)
-showjson - Show message JSON (alias)
 img - Upload image and get link
 cup - Upload image and get link (alias)
 telegraph - Upload image and get link (alias)
 share - Share text as link
 share_text - Share text as link (alias)
 sharetext - Share text as link (alias)
-echo - Repeat the text
 pin - Pin replied message
 unpin - Unpin a message
 unpin_all - Unpin all messages
-promote - Promote a user in group
-demote - Demote a user in group
 stats - Show bot database statistics
 invite - Generate group invite link
 ban - Ban user from using the bot
@@ -293,8 +273,8 @@ For all platforms:
 ---
 
 💬 Support
-<p> <a href="https://telegram.dog/mnbots_support" target="_blank"> <img src="https://img.shields.io/badge/Telegram-Group-30302f?style=flat&logo=telegram" alt="Telegram Group"> </a> <a href="https://telegram.dog/MrMNTG" target="_blank"> <img src="https://img.shields.io/badge/Telegram-Channel-30302f?style=flat&logo=telegram" alt="Telegram Channel"> </a> </p> <hr>
+<p> <a href="https://t.me/RHINO410Bot" target="_blank"> <img src="https://img.shields.io/badge/Telegram-Group-30302f?style=flat&logo=telegram" alt="Telegram Group"> </a> <a href="https://t.me/RHINO410Bot" target="_blank"> <img src="https://img.shields.io/badge/Telegram-Channel-30302f?style=flat&logo=telegram" alt="Telegram Channel"> </a> </p> <hr>
 🙏 Credits
-<ul> <li><a href="https://github.com/pyrogram/pyrogram" target="_blank">Dan</a> for the Pyrogram Library</li> <li><a href="https://github.com/Mahesh0253/Media-Search-bot" target="_blank">Mahesh</a> for the Media Search Bot</li> <li><a href="https://github.com/EvamariaTG/EvaMaria" target="_blank">EvamariaTG</a> for the EvaMaria Bot</li> <li><a href="https://github.com/trojanzhex/Unlimited-Filter-Bot" target="_blank">Trojanz</a> for Unlimited Filter Bot</li> <li>Goutham for ping feature</li> <li>MN TG for editing and modifying this repository(Currently It's Me)</li> <li> If your intrested to Collab with us Just fork this repo and create pull request ------<a href="https://github.com/MN-BOTS/ShobanaFilterBot/fork" target="_blank"> Click Here To Fork Repo  </a></li> </ul> <hr>
+<ul> <li><a href="https://github.com/pyrogram/pyrogram" target="_blank">Dan</a> for the Pyrogram Library</li> <li><a href="https://github.com/Mahesh0253/Media-Search-bot" target="_blank">Mahesh</a> for the Media Search Bot</li> <li><a href="https://github.com/EvamariaTG/EvaMaria" target="_blank">EvamariaTG</a> for the EvaMaria Bot</li> <li><a href="https://github.com/trojanzhex/Unlimited-Filter-Bot" target="_blank">Trojanz</a> for Unlimited Filter Bot</li> <li>Goutham for ping feature</li> <li>Main credits: <a href="https://t.me/RHINO410Bot" target="_blank">t.me/RHINO410Bot</a></li> <li>If you are interested to collaborate, fork this repo and create a pull request: <a href="https://github.com/MN-BOTS/ShobanaFilterBot/fork" target="_blank">Fork Repo</a></li> </ul> <hr>
 📜 Disclaimer
 <p> <a href="https://www.gnu.org/licenses/agpl-3.0.en.html" target="_blank"> <img src="https://www.gnu.org/graphics/agplv3-155x51.png" alt="GNU AGPLv3"> </a> </p> <p> This project is licensed under the <a href="https://github.com/mn-bots/ShobanaFilterBot/blob/main/LICENSE" target="_blank">GNU AGPL 3.0</a>. <strong>Selling this code for monetary gain is strictly prohibited.</strong> </p> <hr> 

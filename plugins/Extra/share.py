@@ -16,8 +16,8 @@ async def share_text(client, message):
     else:
         await vj.reply_text(
             text=f"**Notice:**\n\n1. Send Any Text Messages.\n2. No Media Support\n\n**Any Question Join Support Chat**",               
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Updates Channel", url=f"https://t.me/mnbots"),
-                                                InlineKeyboardButton('ʀᴇᴘᴏ', url='https://github.com/mn-bots/ShobanaFilterBot')]])
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("Updates Channel", url="https://t.me/RHINO410Bot"),
+                                                InlineKeyboardButton('Repo', url='https://github.com/mn-bots/ShobanaFilterBot')]])
             )                                                   
         return
     await vj.reply_text(
