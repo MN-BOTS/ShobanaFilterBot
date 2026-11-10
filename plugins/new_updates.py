@@ -14,7 +14,7 @@ from utils import get_poster
 logger = logging.getLogger(__name__)
 
 # ─── Constants ────────────────────────────────────────────────────────────────
-PAGE_SIZE          = 20   # items per page in the daily summary
+PAGE_SIZE          = 10   # items per page in the daily summary
 SEND_DELAY         = 0.5  # seconds between channel sends (flood-wait safety)
 GETDLINK_PAGE_SIZE = 10    # results per page in /getdlink picker (no hard cap)
 GROUP_SIZE         = 10   # number of titles per grouped channel message
@@ -23,7 +23,7 @@ GROUP_SIZE         = 10   # number of titles per grouped channel message
 # "individual" → send each title as its own IMDb card message (with button)
 # "grouped"    → accumulate, auto-flush every GROUP_SIZE titles as a plain list
 # "manual"     → accumulate forever; admin triggers send with /sendupnow
-CHANNEL_SEND_MODE: str = "manual"
+CHANNEL_SEND_MODE: str = "grouped"
 
 # ─── Grouped message footer ───────────────────────────────────────────────────
 # Shown at the bottom of every grouped channel post. Edit to match your bot/channel.
